@@ -1,6 +1,6 @@
 .PHONY: app frontend backend
 
-app: frontend backend
+app: frontend backend db
 
 frontend:
 	docker compose down -v frontend
@@ -9,3 +9,7 @@ frontend:
 backend:
 	docker compose down -v backend
 	docker compose up backend --build
+
+db:
+	docker compose down -v db
+	docker compose up db --build
