@@ -34,3 +34,20 @@ ON products (source_site, source_product_id)
 WHERE source_product_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC);
+
+UPDATE products
+SET image_url = NULL
+WHERE image_url IS NOT NULL
+  AND (
+    lower(image_url) LIKE '%loading%'
+    OR lower(image_url) LIKE '%spinner%'
+    OR lower(image_url) LIKE '%placeholder%'
+    OR lower(image_url) LIKE '%transparent%'
+    OR lower(image_url) LIKE '%blank%'
+    OR lower(image_url) LIKE '%grey-pixel%'
+    OR lower(image_url) LIKE '%gray-pixel%'
+    OR lower(image_url) LIKE '%pixel.gif%'
+    OR lower(image_url) LIKE '%1x1%'
+    OR lower(image_url) LIKE 'data:image%'
+    OR lower(image_url) LIKE '%.gif%'
+  );

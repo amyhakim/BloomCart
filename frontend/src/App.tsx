@@ -51,6 +51,7 @@ type Product = {
   colorB: string;
   graph: number[];
   isNew?: boolean;
+  imageUrl?: string | null;
   position?: [number, number, number];
 };
 
@@ -134,94 +135,7 @@ const SHELF_ORDER: Shelf[] = [
   "Recently Added",
 ];
 
-const initialProducts: Product[] = [
-  {
-    id: "sneakers",
-    name: "Retro Sneakers",
-    price: "$89",
-    lowest: "$62",
-    rating: "91 / 100",
-    verdict: "Worth it now",
-    saleDate: "On sale",
-    badge: "Worth It",
-    shelf: "Worth It",
-    colorA: "#b7c7e2",
-    colorB: "#8aa6c9",
-    graph: [0.42, 0.4, 0.36, 0.34, 0.3],
-  },
-  {
-    id: "mug",
-    name: "Matcha Ceramic Mug",
-    price: "$22",
-    lowest: "$18",
-    rating: "88 / 100",
-    verdict: "Cozy pick",
-    saleDate: "Jul 24",
-    badge: "Worth It",
-    shelf: "Worth It",
-    colorA: "#cbd7b3",
-    colorB: "#8fae7d",
-    graph: [0.5, 0.44, 0.43, 0.38, 0.35],
-  },
-  {
-    id: "lamp",
-    name: "Brass Reading Lamp",
-    price: "$78",
-    lowest: "$61",
-    rating: "84 / 100",
-    verdict: "Wait one drop",
-    saleDate: "Aug 02",
-    badge: "Waiting",
-    shelf: "Waiting for a Sale",
-    colorA: "#f3dca6",
-    colorB: "#c89253",
-    graph: [0.78, 0.74, 0.66, 0.6, 0.55],
-  },
-  {
-    id: "rug",
-    name: "Mini Wool Rug",
-    price: "$96",
-    lowest: "$72",
-    rating: "80 / 100",
-    verdict: "Watch closely",
-    saleDate: "Aug 09",
-    badge: "Waiting",
-    shelf: "Waiting for a Sale",
-    colorA: "#c9a5a5",
-    colorB: "#8aa6b5",
-    graph: [0.8, 0.72, 0.7, 0.62, 0.55],
-  },
-  {
-    id: "fox",
-    name: "Pocket Fox Plush",
-    price: "$19",
-    lowest: "$15",
-    rating: "95 / 100",
-    verdict: "Purchased joy",
-    saleDate: "Bought",
-    badge: "Purchased",
-    shelf: "Purchased",
-    colorA: "#e6b391",
-    colorB: "#d78d68",
-    graph: [0.48, 0.41, 0.39, 0.36, 0.32],
-  },
-  {
-    id: "notes",
-    name: "Handmade Notes",
-    price: "$12",
-    lowest: "$9",
-    rating: "90 / 100",
-    verdict: "Lovely refill",
-    saleDate: "Jul 29",
-    badge: "Added",
-    shelf: "Recently Added",
-    colorA: "#ead9a8",
-    colorB: "#b5a1c8",
-    graph: [0.55, 0.49, 0.47, 0.42, 0.36],
-  },
-];
-
-/* --------------------------- extension bridge --------------------------- */
+/* ----------------------------- product loading ----------------------------- */
 
 function getStableHash(value: string) {
   let hash = 0;
@@ -294,6 +208,7 @@ function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Produc
       colorB: palette[1],
       graph: [0.68, 0.61, 0.56, 0.5, 0.45],
       isNew: true,
+      imageUrl: item.image_url,
     };
   });
 }
@@ -322,6 +237,36 @@ function emojiFor(name: string) {
   ];
   for (const [key, emoji] of table) if (n.includes(key)) return emoji;
   return "🛍️";
+}
+
+function ProductImage({
+  alt,
+  className,
+  fallback,
+  src,
+}: {
+  alt: string;
+  className: string;
+  fallback: ReactNode;
+  src?: string | null;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = Boolean(src && failedSrc === src);
+
+  if (!src || failed) {
+    return fallback;
+  }
+
+  return (
+    <img
+      alt={alt}
+      className={className}
+      loading="lazy"
+      onError={() => setFailedSrc(src)}
+      referrerPolicy="no-referrer"
+      src={src}
+    />
+  );
 }
 
 /* ------------------------------ room metrics ------------------------------ */
@@ -388,7 +333,7 @@ function wallSlot(
 
 function App() {
   const [view, setView] = useState<CameraView>("default");
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [notification, setNotification] = useState(
@@ -555,6 +500,13 @@ function App() {
       <div className="bc-hint">
         Drag to look around · Click a card for details · Esc to go back
       </div>
+
+      {!products.length && (
+        <div className="bc-empty-state">
+          <strong>No saved products yet</strong>
+          <span>Open a supported cart page and let the BloomCart extension capture it.</span>
+        </div>
+      )}
 
       {selected && (
         <DetailModal product={selected} onClose={() => setSelectedId(null)} />
@@ -931,7 +883,12 @@ function CardWall({
                         background: `linear-gradient(135deg, ${p.colorA}, ${p.colorB})`,
                       }}
                     >
-                      <span className="bc-card-emoji">{emojiFor(p.name)}</span>
+                      <ProductImage
+                        alt={p.name}
+                        className="bc-card-image"
+                        fallback={<span className="bc-card-emoji">{emojiFor(p.name)}</span>}
+                        src={p.imageUrl}
+                      />
                     </span>
                     <span className="bc-card-name">{p.name}</span>
                     <span className="bc-card-foot">
@@ -1542,7 +1499,12 @@ function DetailModal({
               background: `linear-gradient(135deg, ${product.colorA}, ${product.colorB})`,
             }}
           >
-            {emojiFor(product.name)}
+            <ProductImage
+              alt={product.name}
+              className="bc-modal-image"
+              fallback={emojiFor(product.name)}
+              src={product.imageUrl}
+            />
           </span>
           <div>
             <div className="bc-modal-name">{product.name}</div>
@@ -1639,6 +1601,11 @@ function StyleTag() {
       .bc-btn-primary { background: #a98fd0; color: #fffdf7; }
       .bc-hint { position: absolute; right: 18px; bottom: 24px; font-size: 12px; font-weight: 700; color: #7c6350;
         background: rgba(255,253,247,0.7); padding: 7px 13px; border-radius: 13px; }
+      .bc-empty-state { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, 86vw);
+        display: grid; gap: 6px; text-align: center; color: #574234; background: rgba(255,253,247,0.88);
+        border: 2px solid #c6b4e3; border-radius: 22px; padding: 20px; box-shadow: 0 18px 44px rgba(120,90,60,0.22); }
+      .bc-empty-state strong { font-family: 'Baloo 2', cursive; font-size: 22px; }
+      .bc-empty-state span { font-size: 13px; font-weight: 700; color: #7c6350; }
 
       /* shelf label (in-world, via Html) */
       .bc-shelf-label { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 15px; white-space: nowrap;
@@ -1654,7 +1621,8 @@ function StyleTag() {
       .bc-card:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 14px 26px rgba(120,90,60,0.28); }
       .bc-card.is-new { animation: bcpop .5s ease; }
       @keyframes bcpop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-      .bc-card-photo { height: 74px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+      .bc-card-photo { height: 74px; border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      .bc-card-image { width: 100%; height: 100%; object-fit: contain; display: block; padding: 6px; }
       .bc-card-emoji { font-size: 34px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.15)); }
       .bc-card-name { font-weight: 800; font-size: 12.5px; color: #574234; line-height: 1.15;
         overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 29px; }
@@ -1678,7 +1646,8 @@ function StyleTag() {
         width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-weight: 800; }
       .bc-modal-head { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
       .bc-modal-photo { width: 66px; height: 66px; border-radius: 16px; display: flex; align-items: center;
-        justify-content: center; font-size: 34px; flex: none; }
+        justify-content: center; font-size: 34px; flex: none; overflow: hidden; }
+      .bc-modal-image { width: 100%; height: 100%; object-fit: contain; display: block; padding: 6px; }
       .bc-modal-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 20px; color: #574234; }
       .bc-modal-pill { display: inline-block; margin-top: 5px; background: var(--accent); color: #fff; font-weight: 800;
         font-size: 11px; border-radius: 9px; padding: 3px 10px; }

@@ -84,6 +84,32 @@ def parse_quantity(value: str | int | None) -> int:
     return max(1, int(match.group(0)))
 
 
+def clean_image_url(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    normalized = value.strip()
+    lowered = normalized.lower()
+    blocked_patterns = [
+        "loading",
+        "spinner",
+        "placeholder",
+        "transparent",
+        "blank",
+        "grey-pixel",
+        "gray-pixel",
+        "pixel.gif",
+        "1x1",
+        "data:image",
+        ".gif",
+    ]
+
+    if any(pattern in lowered for pattern in blocked_patterns):
+        return None
+
+    return normalized
+
+
 def stable_product_id(site: str, product: CapturedProduct) -> str:
     if product.sourceProductId:
         return product.sourceProductId
@@ -171,7 +197,7 @@ def capture_products(capture: CartCapture):
             price, currency = parse_price(product.price)
             quantity = parse_quantity(product.quantity)
             source_product_id = stable_product_id(capture.supportedSite, product)
-            image_url = product.imageUrl or product.image
+            image_url = clean_image_url(product.imageUrl or product.image)
             raw_product = product.model_dump(mode="json")
 
             conn.execute(
@@ -223,7 +249,7 @@ def capture_products(capture: CartCapture):
                     price = EXCLUDED.price,
                     currency = EXCLUDED.currency,
                     quantity = EXCLUDED.quantity,
-                    image_url = EXCLUDED.image_url,
+                    image_url = COALESCE(EXCLUDED.image_url, products.image_url),
                     captured_at = EXCLUDED.captured_at,
                     last_seen_at = now(),
                     lowest_price = LEAST(COALESCE(products.lowest_price, EXCLUDED.price), COALESCE(EXCLUDED.price, products.lowest_price)),
