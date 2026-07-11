@@ -121,7 +121,7 @@ function App() {
         <Canvas
           shadows
           dpr={[1, 1.75]}
-          camera={{ position: [0, 2.2, 6.4], fov: 42, near: 0.1, far: 80 }}
+          camera={{ position: [0, 1.55, 7.15], fov: 40, near: 0.1, far: 80 }}
           gl={{ antialias: true }}
         >
           <color attach="background" args={["#bfe8d0"]} />
@@ -144,6 +144,7 @@ function AnimalCrossingArchive() {
       <RoomShell />
       <ShelfRow />
       <AnimalCrossingDesk />
+      <BloomCartEntryCard />
       <ContactShadows opacity={0.3} scale={8} blur={2.4} far={4.2} position={[0, 0.012, 0]} />
     </>
   );
@@ -151,8 +152,8 @@ function AnimalCrossingArchive() {
 
 function CameraRig() {
   const { camera, mouse } = useThree();
-  const basePosition = useRef(new THREE.Vector3(0, 2.2, 6.4));
-  const baseLookAt = useRef(new THREE.Vector3(0, 1.05, -1.25));
+  const basePosition = useRef(new THREE.Vector3(0, 1.55, 7.15));
+  const baseLookAt = useRef(new THREE.Vector3(0, 1.08, -1.55));
   const desiredPosition = useRef(new THREE.Vector3());
   const desiredLookAt = useRef(new THREE.Vector3());
   const lookAt = useRef(new THREE.Vector3());
@@ -160,7 +161,7 @@ function CameraRig() {
 
   useFrame((_, delta) => {
     const blend = 1 - Math.exp(-6.8 * delta);
-    mouseOffset.current.set(mouse.x * 0.18, mouse.y * 0.1, 0);
+    mouseOffset.current.set(mouse.x * 0.14, mouse.y * 0.08, 0);
     desiredPosition.current.copy(basePosition.current).add(mouseOffset.current);
     desiredLookAt.current.copy(baseLookAt.current).add(new THREE.Vector3(mouse.x * 0.08, mouse.y * 0.05, 0));
 
@@ -187,10 +188,7 @@ function RoomShell() {
         <boxGeometry args={[0.18, 4, 7.2]} />
         <meshStandardMaterial color="#e9cfaa" roughness={0.9} />
       </mesh>
-      <mesh receiveShadow position={[4.1, 2, 0]}>
-        <boxGeometry args={[0.18, 4, 7.2]} />
-        <meshStandardMaterial color="#e9cfaa" roughness={0.9} />
-      </mesh>
+      <EntryTrim />
       <RoundedBox receiveShadow args={[3.5, 0.035, 2.1]} radius={0.08} smoothness={5} position={[0, 0.028, 1.1]}>
         <meshStandardMaterial color="#d7a86d" roughness={0.82} />
       </RoundedBox>
@@ -200,6 +198,25 @@ function RoomShell() {
           <meshStandardMaterial color="#f0cc93" roughness={0.85} />
         </mesh>
       ))}
+    </group>
+  );
+}
+
+function EntryTrim() {
+  return (
+    <group position={[3.58, 0, 0]}>
+      <mesh castShadow receiveShadow position={[0, 1.98, -2.05]}>
+        <boxGeometry args={[0.22, 3.96, 2.08]} />
+        <meshStandardMaterial color="#e9cfaa" roughness={0.9} />
+      </mesh>
+      <mesh castShadow receiveShadow position={[0, 1.98, 2.55]}>
+        <boxGeometry args={[0.22, 3.96, 1.78]} />
+        <meshStandardMaterial color="#e9cfaa" roughness={0.9} />
+      </mesh>
+      <mesh castShadow position={[0, 3.72, 0.6]}>
+        <boxGeometry args={[0.26, 0.32, 2.9]} />
+        <meshStandardMaterial color="#d8b480" roughness={0.78} />
+      </mesh>
     </group>
   );
 }
@@ -278,6 +295,42 @@ function ShelfItem({ product, slot }: { product: Product; slot: number }) {
         </Text>
       </group>
     </Float>
+  );
+}
+
+function BloomCartEntryCard() {
+  const card = useRef<THREE.Group>(null);
+
+  useFrame((state) => {
+    if (!card.current) return;
+    card.current.position.y = 1.92 + Math.sin(state.clock.elapsedTime * 1.25) * 0.015;
+  });
+
+  return (
+    <group ref={card} position={[0, 1.92, 2.55]} rotation={[0, 0, 0]}>
+      <RoundedBox castShadow args={[2.7, 1.5, 0.08]} radius={0.12} smoothness={8}>
+        <meshStandardMaterial color="#1f1f24" roughness={0.62} transparent opacity={0.9} />
+      </RoundedBox>
+      <RoundedBox position={[0, 0.47, 0.065]} args={[2.34, 0.28, 0.035]} radius={0.08} smoothness={6}>
+        <meshStandardMaterial color="#303037" roughness={0.58} />
+      </RoundedBox>
+      <Text position={[0, 0.48, 0.095]} fontSize={0.14} color="#fff7e8" anchorX="center" anchorY="middle" letterSpacing={0.05}>
+        BloomCart 🌸
+      </Text>
+      <Text position={[0, 0.1, 0.095]} fontSize={0.075} color="#d9d2c6" anchorX="center" anchorY="middle" maxWidth={2.1} textAlign="center">
+        Step inside your cozy shopping archive.
+      </Text>
+      <RoundedBox position={[0, -0.38, 0.075]} args={[1.16, 0.25, 0.045]} radius={0.12} smoothness={8}>
+        <meshStandardMaterial color="#fff4df" roughness={0.55} />
+      </RoundedBox>
+      <Text position={[0, -0.38, 0.11]} fontSize={0.065} color="#3c3027" anchorX="center" anchorY="middle">
+        Shelf View
+      </Text>
+      <mesh position={[0, -0.68, 0.08]}>
+        <torusGeometry args={[0.035, 0.006, 8, 24]} />
+        <meshStandardMaterial color="#fff7e8" roughness={0.45} />
+      </mesh>
+    </group>
   );
 }
 
