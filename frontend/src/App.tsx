@@ -9,13 +9,17 @@ import {
   useGLTF,
 } from '@react-three/drei'
 import gsap from 'gsap'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as THREE from 'three'
 import CrosshairCursor from './components/CrosshairCursor'
 import './App.css'
 
 type CameraView = 'default' | 'register' | 'waiting' | 'worth' | 'dragon' | 'product'
+
+const BLOOMCART_EXTENSION_ID = 'naflnfaamlcdjakgmhaiggmolhceiaok'
+const EXTENSION_POLL_INTERVAL_MS = 2000
+const MAX_EXTENSION_PRODUCTS = 10
 
 type Product = {
   id: string
@@ -33,6 +37,69 @@ type Product = {
   graph: number[]
   isNew?: boolean
 }
+
+type ExtensionCartItem = {
+  name: string | null
+  price: string | null
+  quantity: string | null
+  image: string | null
+  link: string | null
+}
+
+type CartCapture = {
+  supportedSite: string
+  sourceUrl: string
+  extractedAt: string
+  productCount: number
+  products: ExtensionCartItem[]
+}
+
+type ExtensionResponse = {
+  ok: boolean
+  cart?: CartCapture | null
+  error?: string
+}
+
+declare global {
+  interface Window {
+    chrome?: {
+      runtime?: {
+        lastError?: { message?: string }
+        sendMessage?: (
+          extensionId: string,
+          message: { type: string },
+          callback: (response?: ExtensionResponse) => void,
+        ) => void
+      }
+    }
+  }
+}
+
+const extensionProductPositions: Array<[number, number, number]> = [
+  [-2.35, 2.05, -2.66],
+  [-1.45, 2.05, -2.66],
+  [1.45, 2.05, -2.66],
+  [2.35, 2.05, -2.66],
+  [-2.35, 0.95, -2.66],
+  [-1.45, 0.95, -2.66],
+  [-0.45, 0.95, -2.66],
+  [0.45, 0.95, -2.66],
+  [1.45, 0.95, -2.66],
+  [2.35, 0.95, -2.66],
+]
+
+const productPalettes = [
+  ['#9cbad6', '#d9b3d7'],
+  ['#dcbf91', '#879f7a'],
+  ['#cbd7b3', '#f6dec8'],
+  ['#c89253', '#f3dca6'],
+  ['#b98d8d', '#8aa6b5'],
+  ['#ead9a8', '#b5a1c8'],
+  ['#d78d68', '#fff0d9'],
+  ['#a6c8ba', '#e7c49b'],
+  ['#c7b1d7', '#f0d7a6'],
+  ['#9db1bd', '#d8aa8a'],
+]
 
 const cameraViews: Record<Exclude<CameraView, 'product'>, { position: THREE.Vector3; lookAt: THREE.Vector3 }> = {
   default: {
@@ -152,14 +219,124 @@ const initialProducts: Product[] = [
 
 const ArchiveScene = lazy(async () => ({ default: Scene }))
 
+function getStableHash(value: string) {
+  let hash = 0
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index)
+    hash |= 0
+  }
+
+  return Math.abs(hash).toString(36)
+}
+
+function getExtensionCart() {
+  return new Promise<ExtensionResponse>((resolve) => {
+    if (!window.chrome?.runtime?.sendMessage) {
+      resolve({ ok: false, error: 'Chrome runtime is unavailable.' })
+      return
+    }
+
+    window.chrome.runtime.sendMessage(
+      BLOOMCART_EXTENSION_ID,
+      { type: 'BLOOMCART_GET_LATEST_CART' },
+      (response) => {
+        const runtimeError = window.chrome?.runtime?.lastError?.message
+
+        if (runtimeError) {
+          resolve({ ok: false, error: runtimeError })
+          return
+        }
+
+        resolve(response ?? { ok: false, error: 'The BloomCart extension did not respond.' })
+      },
+    )
+  })
+}
+
+function cartCaptureToProducts(cart: CartCapture): Product[] {
+  return cart.products.slice(0, MAX_EXTENSION_PRODUCTS).map((item, index) => {
+    const name = item.name || 'Captured Cart Item'
+    const price = item.price || 'Unknown'
+    const hash = getStableHash(`${cart.supportedSite}|${name}|${price}|${item.link ?? index}`)
+    const palette = productPalettes[index % productPalettes.length]
+
+    return {
+      id: `extension-${hash}`,
+      name,
+      price,
+      lowest: price,
+      rating: 'Analyzing',
+      verdict: 'Recently captured',
+      saleDate: 'Captured',
+      badge: item.quantity ? `Qty ${item.quantity}` : 'New',
+      shelf: 'Recently Added',
+      colorA: palette[0],
+      colorB: palette[1],
+      position: extensionProductPositions[index],
+      graph: [0.68, 0.61, 0.56, 0.5, 0.45],
+      isNew: true,
+    }
+  })
+}
+
 function App() {
   const [view, setView] = useState<CameraView>('default')
   const [products, setProducts] = useState<Product[]>(initialProducts)
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [notification, setNotification] = useState('Dragon archivist is ready.')
+  const lastExtensionSignature = useRef('')
 
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null
+
+  const syncExtensionCart = useCallback(async (manual = false) => {
+    if (manual) {
+      setNotification('Checking the BloomCart extension...')
+    }
+
+    const response = await getExtensionCart()
+
+    if (!response.ok) {
+      if (manual || !lastExtensionSignature.current) {
+        setNotification(`Extension not connected: ${response.error ?? 'unknown error'}`)
+      }
+      return
+    }
+
+    if (!response.cart) {
+      if (manual || !lastExtensionSignature.current) {
+        setNotification('Waiting for a supported cart page capture.')
+      }
+      return
+    }
+
+    const signature = JSON.stringify({
+      site: response.cart.supportedSite,
+      sourceUrl: response.cart.sourceUrl,
+      products: response.cart.products.slice(0, MAX_EXTENSION_PRODUCTS),
+    })
+
+    if (!manual && signature === lastExtensionSignature.current) {
+      return
+    }
+
+    lastExtensionSignature.current = signature
+
+    const capturedProducts = cartCaptureToProducts(response.cart)
+    const visibleCount = capturedProducts.length
+
+    setProducts(capturedProducts)
+    setSelectedProductId(capturedProducts[0]?.id ?? null)
+    setView(capturedProducts[0] ? 'product' : 'default')
+    setNotification(
+      visibleCount
+        ? `${visibleCount} cart item${visibleCount === 1 ? '' : 's'} archived from ${response.cart.supportedSite}.`
+        : `No products found in the latest ${response.cart.supportedSite} cart capture.`,
+    )
+    setIsAnalyzing(true)
+    window.setTimeout(() => setIsAnalyzing(false), 1200)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -173,40 +350,15 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const handleUpload = () => {
-    setIsAnalyzing(true)
-    setSelectedProductId(null)
-    setView('register')
-    setNotification('Cart upload received. Scanner is warming up...')
+  useEffect(() => {
+    const initialPollId = window.setTimeout(() => void syncExtensionCart(), 0)
+    const intervalId = window.setInterval(() => void syncExtensionCart(), EXTENSION_POLL_INTERVAL_MS)
 
-    window.setTimeout(() => {
-      const uploadedProduct: Product = {
-        id: `uploaded-teapot-${Date.now()}`,
-        name: 'Blueberry Teapot',
-        price: '$42',
-        lowest: '$36',
-        rating: '91 / 100',
-        verdict: 'Save to Worth It',
-        saleDate: 'Jul 21',
-        badge: 'New',
-        shelf: 'Recently Added',
-        colorA: '#9cbad6',
-        colorB: '#d9b3d7',
-        position: [1.35, 0.95, -2.66],
-        graph: [0.64, 0.56, 0.51, 0.48, 0.41],
-        isNew: true,
-      }
-
-      setProducts((currentProducts) => [
-        ...currentProducts.filter((product) => !product.id.startsWith('uploaded-teapot-')),
-        uploadedProduct,
-      ])
-      setSelectedProductId(uploadedProduct.id)
-      setView('product')
-      setNotification('Blueberry Teapot archived in Recently Added.')
-      setIsAnalyzing(false)
-    }, 3300)
-  }
+    return () => {
+      window.clearTimeout(initialPollId)
+      window.clearInterval(intervalId)
+    }
+  }, [syncExtensionCart])
 
   return (
     <main className="app-shell">
@@ -234,7 +386,7 @@ function App() {
       <CrosshairCursor />
 
       <nav className="top-controls" aria-label="BloomCart controls">
-        <button type="button" onClick={handleUpload}>Upload Cart</button>
+        <button type="button" onClick={() => void syncExtensionCart(true)}>Refresh Cart</button>
         <button type="button" onClick={() => setView('default')}>Settings</button>
         <button type="button" className="notification-pill">{notification}</button>
       </nav>
