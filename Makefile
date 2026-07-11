@@ -1,4 +1,4 @@
-.PHONY: app frontend backend
+.PHONY: stop start restart
 
 stop:
 	docker compose down -v
