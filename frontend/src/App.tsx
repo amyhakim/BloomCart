@@ -106,6 +106,12 @@ type ProductsResponse = {
   products: DatabaseProduct[];
 };
 
+type EcoSummaryResponse = {
+  ok: boolean;
+  cached: boolean;
+  product: DatabaseProduct;
+};
+
 type ExtensionPriceCheckResponse = {
   ok: boolean;
   result?: {
@@ -206,6 +212,29 @@ async function getDatabaseProducts() {
   return payload.products;
 }
 
+async function generateEcoSummary(productId: string) {
+  const response = await fetch(`${API_BASE_URL}/products/${productId}/eco-summary`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let detail = `Eco summary API returned ${response.status}`;
+
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) {
+        detail = payload.detail;
+      }
+    } catch {
+      // Keep the HTTP status fallback when no JSON error body is available.
+    }
+
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as EcoSummaryResponse;
+}
+
 function formatProductPrice(product: DatabaseProduct) {
   const resolvedPrice =
     product.price ??
@@ -250,6 +279,11 @@ function buildPriceTrend(prices: number[] | null) {
     .filter((price) => Number.isFinite(price))
     .slice(-6);
   return trend.length ? trend : [1];
+}
+
+function shouldGenerateEcoVerdict(verdict: string) {
+  const normalized = verdict.trim();
+  return !normalized || normalized === "Recently captured";
 }
 
 function databaseProductsToProducts(
@@ -413,6 +447,20 @@ function App() {
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
 
+  const applyDatabaseProductUpdate = useCallback((databaseProduct: DatabaseProduct) => {
+    const [updatedProduct] = databaseProductsToProducts([databaseProduct]);
+
+    if (!updatedProduct) {
+      return;
+    }
+
+    setProducts((current) =>
+      current.map((product) =>
+        product.databaseId === databaseProduct.id ? updatedProduct : product,
+      ),
+    );
+  }, []);
+
   const checkProductPrice = useCallback(async (product: Product) => {
     if (!product.databaseId) {
       console.warn(
@@ -550,6 +598,36 @@ function App() {
       window.clearInterval(interval);
     };
   }, [syncDatabaseProducts]);
+
+  useEffect(() => {
+    if (!selected?.databaseId || !shouldGenerateEcoVerdict(selected.verdict)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void generateEcoSummary(selected.databaseId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        applyDatabaseProductUpdate(response.product);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setNotification(
+          `Eco insight unavailable: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDatabaseProductUpdate, selected]);
 
   const counts = useMemo(() => {
     const c: Record<Shelf, number> = {

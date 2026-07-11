@@ -18,6 +18,8 @@ services:
       - ./backend:/app:Z
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/db
+      GEMINI_API_KEY: 
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
     depends_on:
       postgres:
         condition: service_healthy

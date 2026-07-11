@@ -9,16 +9,26 @@ from typing import Any
 
 import httpx
 import psycopg
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
+from google import genai
 
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/mydb")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_TIMEOUT_SECONDS = 20
 MAX_PRODUCTS = 10
 PRICE_FETCH_TIMEOUT_SECONDS = 20
+DEFAULT_VERDICTS = {"Recently captured", ""}
+client = genai.Client(api_key=GEMINI_API_KEY)
+
 
 app = FastAPI()
 app.add_middleware(
@@ -225,6 +235,50 @@ def latest_price(prices: list[Decimal] | None) -> Decimal | None:
 def lowest_price(prices: list[Decimal] | None) -> Decimal | None:
     normalized = normalize_prices(prices)
     return min(normalized) if normalized else None
+
+
+def has_cached_verdict(verdict: str | None) -> bool:
+    return bool(verdict and verdict.strip() and verdict.strip() not in DEFAULT_VERDICTS)
+
+
+def build_eco_prompt(row: dict[str, Any]) -> str:
+    prices = [str(price) for price in normalize_prices(row.get("prices"))[-6:]]
+    raw_product = row.get("raw_product") or {}
+    raw_product_json = json.dumps(raw_product, ensure_ascii=True)[:2000]
+
+    return (
+        "You are writing a short eco-friendly shopping note for a product detail modal in an app. "
+        "Use only the provided product data. Do not invent certifications, materials, sourcing, carbon claims, "
+        "or manufacturing details. If the data is insufficient, explicitly say that the sustainability details are "
+        "unclear and give one practical lower-impact shopping tip relevant to the product type. "
+        "Return exactly one plain-text paragraph under 45 words. No markdown, no bullets, no quotes.\n\n"
+        f"Product name: {row.get('name') or 'Unknown'}\n"
+        f"Source site: {row.get('source_site') or 'Unknown'}\n"
+        f"Source URL: {row.get('source_url') or 'Unknown'}\n"
+        f"Currency: {row.get('currency') or 'Unknown'}\n"
+        f"Quantity: {row.get('quantity') or 'Unknown'}\n"
+        f"Recent prices: {', '.join(prices) if prices else 'None'}\n"
+        f"Badge: {row.get('badge') or 'None'}\n"
+        f"Rating: {row.get('rating') or 'None'}\n"
+        f"Raw product JSON: {raw_product_json}"
+    )
+
+
+def generate_eco_verdict(row: dict[str, Any]) -> str:
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured")
+
+    response = client.models.generate_content(
+        model="gemini-3.5-flash",
+        contents=build_eco_prompt(row),
+    )
+
+    verdict = (response.text or "").strip()
+
+    if not verdict:
+        raise HTTPException(status_code=502, detail="Gemini returned an empty eco verdict")
+
+    return verdict
 
 
 def serialize_product(row: dict[str, Any]) -> dict[str, Any]:
@@ -494,6 +548,105 @@ def get_product(product_id: str):
         raise HTTPException(status_code=404, detail="Product not found")
 
     return serialize_product(dict(zip(columns, row, strict=True)))
+
+
+@app.post("/products/{product_id}/eco-summary")
+def generate_product_eco_summary(product_id: str):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT
+              id::text,
+              source_site,
+              source_product_id,
+              source_url,
+              cart_url,
+              prices,
+              name,
+              currency,
+              quantity,
+              image_url,
+              captured_at,
+              last_seen_at,
+              previous_price,
+              last_checked_at,
+              price_changed_at,
+              check_error,
+              price_check_method,
+              rating,
+              verdict,
+              badge,
+              shelf,
+              raw_product,
+              created_at,
+              updated_at
+            FROM products
+            WHERE id = %s
+            """,
+            (product_id,),
+        )
+        row = cursor.fetchone()
+        columns = [column.name for column in cursor.description] if cursor.description else []
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        product = dict(zip(columns, row, strict=True))
+
+        if has_cached_verdict(product.get("verdict")):
+            return {
+                "ok": True,
+                "cached": True,
+                "product": serialize_product(product),
+            }
+
+        try:
+            verdict = generate_eco_verdict(product)
+        except httpx.HTTPError as error:
+            raise HTTPException(status_code=502, detail=f"Could not generate eco verdict: {error}") from error
+
+        updated_cursor = conn.execute(
+            """
+            UPDATE products
+            SET verdict = %s,
+                updated_at = now()
+            WHERE id = %s
+            RETURNING
+              id::text,
+              source_site,
+              source_product_id,
+              source_url,
+              cart_url,
+              prices,
+              name,
+              currency,
+              quantity,
+              image_url,
+              captured_at,
+              last_seen_at,
+              previous_price,
+              last_checked_at,
+              price_changed_at,
+              check_error,
+              price_check_method,
+              rating,
+              verdict,
+              badge,
+              shelf,
+              raw_product,
+              created_at,
+              updated_at
+            """,
+            (verdict, product_id),
+        )
+        updated_row = updated_cursor.fetchone()
+        updated_columns = [column.name for column in updated_cursor.description] if updated_cursor.description else []
+
+    return {
+        "ok": True,
+        "cached": False,
+        "product": serialize_product(dict(zip(updated_columns, updated_row, strict=True))),
+    }
 
 
 @app.post("/products/{product_id}/price-check-result")
