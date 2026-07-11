@@ -3,12 +3,18 @@ services:
     build: ./frontend
     ports:
       - "5173:5173"
+    depends_on:
+      - backend
     restart: unless-stopped
 
   backend:
     build: ./backend
     ports:
       - "8080:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/mydb
+    depends_on:
+      - postgres
     restart: unless-stopped
 
   postgres:
@@ -19,10 +25,10 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: mydb
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - /db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
 volumes:
   postgres_data:

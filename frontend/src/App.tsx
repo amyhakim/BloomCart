@@ -17,9 +17,9 @@ import './App.css'
 
 type CameraView = 'default' | 'register' | 'waiting' | 'worth' | 'dragon' | 'product'
 
-const BLOOMCART_EXTENSION_ID = 'naflnfaamlcdjakgmhaiggmolhceiaok'
-const EXTENSION_POLL_INTERVAL_MS = 2000
-const MAX_EXTENSION_PRODUCTS = 10
+const API_BASE_URL = 'http://localhost:8080'
+const PRODUCT_POLL_INTERVAL_MS = 2000
+const MAX_RENDERED_PRODUCTS = 10
 
 type Product = {
   id: string
@@ -38,41 +38,28 @@ type Product = {
   isNew?: boolean
 }
 
-type ExtensionCartItem = {
-  name: string | null
-  price: string | null
-  quantity: string | null
-  image: string | null
-  link: string | null
+type DatabaseProduct = {
+  id: string
+  source_site: string
+  source_product_id: string | null
+  source_url: string | null
+  cart_url: string | null
+  name: string
+  price: number | null
+  currency: string | null
+  quantity: number | null
+  image_url: string | null
+  captured_at: string | null
+  last_seen_at: string | null
+  lowest_price: number | null
+  rating: string | null
+  verdict: string | null
+  badge: string | null
+  shelf: Product['shelf'] | null
 }
 
-type CartCapture = {
-  supportedSite: string
-  sourceUrl: string
-  extractedAt: string
-  productCount: number
-  products: ExtensionCartItem[]
-}
-
-type ExtensionResponse = {
-  ok: boolean
-  cart?: CartCapture | null
-  error?: string
-}
-
-declare global {
-  interface Window {
-    chrome?: {
-      runtime?: {
-        lastError?: { message?: string }
-        sendMessage?: (
-          extensionId: string,
-          message: { type: string },
-          callback: (response?: ExtensionResponse) => void,
-        ) => void
-      }
-    }
-  }
+type ProductsResponse = {
+  products: DatabaseProduct[]
 }
 
 const extensionProductPositions: Array<[number, number, number]> = [
@@ -230,47 +217,51 @@ function getStableHash(value: string) {
   return Math.abs(hash).toString(36)
 }
 
-function getExtensionCart() {
-  return new Promise<ExtensionResponse>((resolve) => {
-    if (!window.chrome?.runtime?.sendMessage) {
-      resolve({ ok: false, error: 'Chrome runtime is unavailable.' })
-      return
-    }
+async function getDatabaseProducts() {
+  const response = await fetch(`${API_BASE_URL}/products?limit=${MAX_RENDERED_PRODUCTS}`)
 
-    window.chrome.runtime.sendMessage(
-      BLOOMCART_EXTENSION_ID,
-      { type: 'BLOOMCART_GET_LATEST_CART' },
-      (response) => {
-        const runtimeError = window.chrome?.runtime?.lastError?.message
+  if (!response.ok) {
+    throw new Error(`Product API returned ${response.status}`)
+  }
 
-        if (runtimeError) {
-          resolve({ ok: false, error: runtimeError })
-          return
-        }
-
-        resolve(response ?? { ok: false, error: 'The BloomCart extension did not respond.' })
-      },
-    )
-  })
+  const payload = (await response.json()) as ProductsResponse
+  return payload.products
 }
 
-function cartCaptureToProducts(cart: CartCapture): Product[] {
-  return cart.products.slice(0, MAX_EXTENSION_PRODUCTS).map((item, index) => {
-    const name = item.name || 'Captured Cart Item'
-    const price = item.price || 'Unknown'
-    const hash = getStableHash(`${cart.supportedSite}|${name}|${price}|${item.link ?? index}`)
+function formatProductPrice(product: DatabaseProduct) {
+  if (product.price === null) {
+    return 'Unknown'
+  }
+
+  const currencyPrefix = product.currency === 'USD' ? '$' : product.currency ? `${product.currency} ` : ''
+  return `${currencyPrefix}${product.price.toFixed(2)}`
+}
+
+function formatCapturedDate(value: string | null) {
+  if (!value) {
+    return 'Captured'
+  }
+
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit' }).format(new Date(value))
+}
+
+function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Product[] {
+  return databaseProducts.slice(0, MAX_RENDERED_PRODUCTS).map((item, index) => {
+    const price = formatProductPrice(item)
+    const lowest = item.lowest_price === null ? price : formatProductPrice({ ...item, price: item.lowest_price })
+    const hash = getStableHash(`${item.source_site}|${item.id}|${item.source_product_id ?? ''}`)
     const palette = productPalettes[index % productPalettes.length]
 
     return {
       id: `extension-${hash}`,
-      name,
+      name: item.name,
       price,
-      lowest: price,
-      rating: 'Analyzing',
-      verdict: 'Recently captured',
-      saleDate: 'Captured',
-      badge: item.quantity ? `Qty ${item.quantity}` : 'New',
-      shelf: 'Recently Added',
+      lowest,
+      rating: item.rating || 'Analyzing',
+      verdict: item.verdict || 'Recently captured',
+      saleDate: formatCapturedDate(item.captured_at),
+      badge: item.badge || (item.quantity && item.quantity > 1 ? `Qty ${item.quantity}` : 'New'),
+      shelf: item.shelf || 'Recently Added',
       colorA: palette[0],
       colorB: palette[1],
       position: extensionProductPositions[index],
@@ -286,53 +277,54 @@ function App() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [notification, setNotification] = useState('Dragon archivist is ready.')
-  const lastExtensionSignature = useRef('')
+  const lastProductSignature = useRef('')
 
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null
 
-  const syncExtensionCart = useCallback(async (manual = false) => {
+  const syncDatabaseProducts = useCallback(async (manual = false) => {
     if (manual) {
-      setNotification('Checking the BloomCart extension...')
+      setNotification('Checking saved BloomCart products...')
     }
 
-    const response = await getExtensionCart()
+    let databaseProducts: DatabaseProduct[]
 
-    if (!response.ok) {
-      if (manual || !lastExtensionSignature.current) {
-        setNotification(`Extension not connected: ${response.error ?? 'unknown error'}`)
+    try {
+      databaseProducts = await getDatabaseProducts()
+    } catch (error) {
+      if (manual || !lastProductSignature.current) {
+        setNotification(`Product database unavailable: ${error instanceof Error ? error.message : 'unknown error'}`)
       }
       return
     }
 
-    if (!response.cart) {
-      if (manual || !lastExtensionSignature.current) {
-        setNotification('Waiting for a supported cart page capture.')
+    if (!databaseProducts.length) {
+      if (manual || !lastProductSignature.current) {
+        setNotification('Waiting for the extension to save cart products.')
       }
       return
     }
 
     const signature = JSON.stringify({
-      site: response.cart.supportedSite,
-      sourceUrl: response.cart.sourceUrl,
-      products: response.cart.products.slice(0, MAX_EXTENSION_PRODUCTS),
+      products: databaseProducts.slice(0, MAX_RENDERED_PRODUCTS),
     })
 
-    if (!manual && signature === lastExtensionSignature.current) {
+    if (!manual && signature === lastProductSignature.current) {
       return
     }
 
-    lastExtensionSignature.current = signature
+    lastProductSignature.current = signature
 
-    const capturedProducts = cartCaptureToProducts(response.cart)
+    const capturedProducts = databaseProductsToProducts(databaseProducts)
     const visibleCount = capturedProducts.length
+    const site = databaseProducts[0]?.source_site ?? 'the database'
 
     setProducts(capturedProducts)
     setSelectedProductId(capturedProducts[0]?.id ?? null)
     setView(capturedProducts[0] ? 'product' : 'default')
     setNotification(
       visibleCount
-        ? `${visibleCount} cart item${visibleCount === 1 ? '' : 's'} archived from ${response.cart.supportedSite}.`
-        : `No products found in the latest ${response.cart.supportedSite} cart capture.`,
+        ? `${visibleCount} saved product${visibleCount === 1 ? '' : 's'} loaded from ${site}.`
+        : 'No saved products found yet.',
     )
     setIsAnalyzing(true)
     window.setTimeout(() => setIsAnalyzing(false), 1200)
@@ -351,14 +343,14 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const initialPollId = window.setTimeout(() => void syncExtensionCart(), 0)
-    const intervalId = window.setInterval(() => void syncExtensionCart(), EXTENSION_POLL_INTERVAL_MS)
+    const initialPollId = window.setTimeout(() => void syncDatabaseProducts(), 0)
+    const intervalId = window.setInterval(() => void syncDatabaseProducts(), PRODUCT_POLL_INTERVAL_MS)
 
     return () => {
       window.clearTimeout(initialPollId)
       window.clearInterval(intervalId)
     }
-  }, [syncExtensionCart])
+  }, [syncDatabaseProducts])
 
   return (
     <main className="app-shell">
@@ -386,7 +378,7 @@ function App() {
       <CrosshairCursor />
 
       <nav className="top-controls" aria-label="BloomCart controls">
-        <button type="button" onClick={() => void syncExtensionCart(true)}>Refresh Cart</button>
+        <button type="button" onClick={() => void syncDatabaseProducts(true)}>Refresh Products</button>
         <button type="button" onClick={() => setView('default')}>Settings</button>
         <button type="button" className="notification-pill">{notification}</button>
       </nav>

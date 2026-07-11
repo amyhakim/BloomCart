@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -26,3 +28,9 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS products_source_identity_idx
+ON products (source_site, source_product_id)
+WHERE source_product_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC);
