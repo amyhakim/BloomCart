@@ -47,13 +47,22 @@ const DESK_MODEL_URL = "/models/desk.glb";
 const RETSUKO_MODEL_URL = "/models/retsuko.glb";
 
 const DESK_SCALE = 0.7;
-const DESK_POSITION: [number, number, number] = [-0.1, 0, -1.3];
+const DESK_POSITION: [number, number, number] = [-0.1, 0, -2.6];
 const DESK_ROTATION_Y = Math.PI / 2; // turns the long side toward the camera
 
 const RETSUKO_SCALE = 0.4; // ~4.2-unit model -> ~1.7 in-scene
-const RETSUKO_POSITION: [number, number, number] = [0, 0, -1.95]; // behind the desk
+const RETSUKO_POSITION: [number, number, number] = [0, 0, -3.15]; // behind the desk, near the back wall
 const RETSUKO_ROTATION_Y = 0; // if she's paper-thin / faces away: try Math.PI or Math.PI/2
 const RETSUKO_PLAY_ANIMATION = true; // set false if the spin looks off
+
+const PAINTING_MODEL_URL = "/models/painting.glb";
+const PAINTING_SCALE = 1;
+const PAINTING_POSITION: [number, number, number] = [0, 2.1, -3.55]; // mounted on the back wall
+const PAINTING_ROTATION_X = 0;
+// the model's thin (frame-depth) axis is local X, not Y — rotate around Y so
+// that thin axis points along world Z (the wall's normal) instead of poking
+// through the wall. Flip the sign (-Math.PI / 2) if it ends up facing the wall.
+const PAINTING_ROTATION_Y = Math.PI / 2;
 
 /* ------------------------------- data ------------------------------- */
 
@@ -644,7 +653,7 @@ function App() {
       <Canvas
         shadows
         dpr={[1, 1.8]}
-        camera={{ position: [0, 1.6, 5], fov: 40, near: 0.1, far: 60 }}
+        camera={{ position: [0, 1.0, 5], fov: 40, near: 0.1, far: 60 }}
         gl={{ antialias: true }}
       >
         <color attach="background" args={["#efe6d2"]} />
@@ -780,6 +789,7 @@ function Scene({
       <Suspense fallback={null}>
         <Desk setView={setView} />
         <Retsuko isAnalyzing={isAnalyzing} setView={setView} />
+        <Painting />
       </Suspense>
 
       <CornerPlants />
@@ -1207,8 +1217,29 @@ function Retsuko({
   );
 }
 
+function Painting() {
+  const { scene } = useGLTF(PAINTING_MODEL_URL);
+
+  useEffect(() => {
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) mesh.castShadow = true;
+    });
+  }, [scene]);
+
+  return (
+    <primitive
+      object={scene}
+      position={PAINTING_POSITION}
+      rotation={[PAINTING_ROTATION_X, PAINTING_ROTATION_Y, 0]}
+      scale={PAINTING_SCALE}
+    />
+  );
+}
+
 useGLTF.preload(DESK_MODEL_URL);
 useGLTF.preload(RETSUKO_MODEL_URL);
+useGLTF.preload(PAINTING_MODEL_URL);
 
 function CornerPlants() {
   const spots: [number, number, number][] = [
