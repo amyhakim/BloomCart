@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from decimal import Decimal
 
 import psycopg2
 
@@ -38,8 +39,11 @@ while True:
                 else:
                     current = random.randint(1000, 10000)
 
-                change = random.uniform(-0.10, 0.10)
-                new_price = max(1, round(current * (1 + change)))
+                change = Decimal(str(random.uniform(-0.10, 0.10)))
+                new_price = (current * (Decimal("1") + change)).quantize(Decimal("0.01"))
+
+                if new_price < Decimal("1.00"):
+                    new_price = Decimal("1.00")
 
                 cur.execute(
                     """
