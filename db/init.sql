@@ -38,7 +38,6 @@ WHERE source_product_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC);
 
-ALTER TABLE products ADD COLUMN IF NOT EXISTS previous_price NUMERIC(12, 2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS price_changed_at TIMESTAMPTZ;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS check_error TEXT;

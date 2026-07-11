@@ -1,6 +1,7 @@
 import os
 import random
 import time
+from decimal import Decimal
 
 import psycopg2
 
@@ -12,7 +13,7 @@ def connect():
 
 
 while True:
-    time.sleep(random.randint(30, 180))
+    time.sleep(random.randint(30, 45))
 
     try:
         with connect() as conn:
@@ -34,17 +35,20 @@ while True:
                 prices = prices or []
 
                 if prices:
-                    current = prices[-1]
+                    current = Decimal(str(prices[-1]))
                 else:
-                    current = random.randint(1000, 10000)
+                    current = Decimal(random.randint(100, 10000)) / Decimal("100")
 
-                change = random.uniform(-0.10, 0.10)
-                new_price = max(1, round(current * (1 + change)))
+                change = Decimal(random.randint(-10, 10)) / Decimal("100")
+                new_price = (current * (Decimal("1") + change)).quantize(Decimal("0.01"))
+
+                if new_price < Decimal("1.00"):
+                    new_price = Decimal("1.00")
 
                 cur.execute(
                     """
                     UPDATE products
-                    SET prices = array_append(prices, %s),
+                    SET prices = array_append(COALESCE(prices, ARRAY[]::NUMERIC(12, 2)[]), %s),
                         previous_price = %s,
                         updated_at = now(),
                         last_checked_at = now(),

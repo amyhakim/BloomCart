@@ -243,6 +243,11 @@ function normalizeShelf(value: string | null): Shelf {
   return "Recently Added";
 }
 
+function buildPriceTrend(prices: number[] | null) {
+  const trend = (prices ?? []).filter((price) => Number.isFinite(price)).slice(-6);
+  return trend.length ? trend : [1];
+}
+
 function databaseProductsToProducts(
   databaseProducts: DatabaseProduct[],
 ): Product[] {
@@ -275,7 +280,7 @@ function databaseProductsToProducts(
       shelf: normalizeShelf(item.shelf),
       colorA: palette[0],
       colorB: palette[1],
-      graph: [0.68, 0.61, 0.56, 0.5, 0.45],
+      graph: buildPriceTrend(item.prices),
       isNew: true,
       imageUrl: item.image_url,
     };
