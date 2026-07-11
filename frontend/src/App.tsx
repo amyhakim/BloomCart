@@ -1,35 +1,59 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Html, Sparkles, useCursor } from "@react-three/drei";
+import {
+  ContactShadows,
+  Html,
+  Sparkles,
+  useAnimations,
+  useCursor,
+  useGLTF,
+} from "@react-three/drei";
 import gsap from "gsap";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import * as THREE from "three";
 
 /* ============================================================== *
  *  BloomCart — a cozy low-poly archive for your shopping cart.
  *  You stand in the middle of the shop; each wall is a shelf of
- *  2D cards (Worth It / Waiting / Purchased / Recently Added).
- *  The dragon archivist works the island counter and tells you
- *  what's worth buying now vs. worth waiting on.
+ *  2D cards (Buy / Waiting for a Sale).
+ *  Retsuko works the desk and tells you what's worth buying
+ *  now vs. worth waiting on.
  *
  *  Everything is in this one file. The Chrome-extension cart
  *  capture from the team is preserved (Refresh Cart button +
  *  background polling).
  * ============================================================== */
 
-type Shelf = "Worth It" | "Waiting for a Sale" | "Purchased" | "Recently Added";
-type CameraView =
-  | "default"
-  | "register"
-  | "worth"
-  | "waiting"
-  | "purchased"
-  | "recently";
+type Shelf = "Buy" | "Waiting for a Sale";
+type CameraView = "default" | "register" | "buy" | "waiting";
 
 const API_BASE_URL = "http://localhost:8080";
 const BLOOMCART_EXTENSION_ID = "naflnfaamlcdjakgmhaiggmolhceiaok";
 const PRODUCT_POLL_INTERVAL_MS = 2000;
 const MAX_RENDERED_PRODUCTS = 10;
+
+const INVERT_DRAG_X = false; // set true to reverse left/right
+const INVERT_DRAG_Y = false; // set true to reverse up/down
+
+/* ------------------------- GLB props (tweak these) ------------------------- */
+const DESK_MODEL_URL = "/models/desk.glb";
+const RETSUKO_MODEL_URL = "/models/retsuko.glb";
+
+const DESK_SCALE = 0.7;
+const DESK_POSITION: [number, number, number] = [-0.1, 0, -1.3];
+const DESK_ROTATION_Y = Math.PI / 2; // turns the long side toward the camera
+
+const RETSUKO_SCALE = 0.4; // ~4.2-unit model -> ~1.7 in-scene
+const RETSUKO_POSITION: [number, number, number] = [0, 0, -1.95]; // behind the desk
+const RETSUKO_ROTATION_Y = 0; // if she's paper-thin / faces away: try Math.PI or Math.PI/2
+const RETSUKO_PLAY_ANIMATION = true; // set false if the spin looks off
 
 /* ------------------------------- data ------------------------------- */
 
@@ -142,10 +166,10 @@ const SHELF_META: Record<
     blurb: string;
   }
 > = {
-  "Worth It": {
+  Buy: {
     color: "#7bb45f",
-    view: "worth",
-    wall: "back",
+    view: "buy",
+    wall: "left",
     blurb: "Good price for the quality — grab it.",
   },
   "Waiting for a Sale": {
@@ -154,26 +178,9 @@ const SHELF_META: Record<
     wall: "right",
     blurb: "Likely to drop soon. Hold tight.",
   },
-  Purchased: {
-    color: "#6f9fd8",
-    view: "purchased",
-    wall: "left",
-    blurb: "Already yours. Nice one.",
-  },
-  "Recently Added": {
-    color: "#a98fd0",
-    view: "recently",
-    wall: "front",
-    blurb: "Fresh from your cart, being analyzed.",
-  },
 };
 
-const SHELF_ORDER: Shelf[] = [
-  "Worth It",
-  "Waiting for a Sale",
-  "Purchased",
-  "Recently Added",
-];
+const SHELF_ORDER: Shelf[] = ["Buy", "Waiting for a Sale"];
 
 /* ----------------------------- product loading ----------------------------- */
 
@@ -231,20 +238,17 @@ function formatCapturedDate(value: string | null) {
 }
 
 function normalizeShelf(value: string | null): Shelf {
-  if (
-    value === "Worth It" ||
-    value === "Waiting for a Sale" ||
-    value === "Purchased" ||
-    value === "Recently Added"
-  ) {
+  if (value === "Waiting for a Sale") {
     return value;
   }
 
-  return "Recently Added";
+  return "Buy";
 }
 
 function buildPriceTrend(prices: number[] | null) {
-  const trend = (prices ?? []).filter((price) => Number.isFinite(price)).slice(-6);
+  const trend = (prices ?? [])
+    .filter((price) => Number.isFinite(price))
+    .slice(-6);
   return trend.length ? trend : [1];
 }
 
@@ -357,24 +361,16 @@ const cameraViews: Record<
     lookAt: new THREE.Vector3(0, 1.35, -3.6),
   },
   register: {
-    position: new THREE.Vector3(0, 1.5, 0.55),
-    lookAt: new THREE.Vector3(0, 0.72, -1.15),
-  },
-  worth: {
-    position: new THREE.Vector3(0, 1.55, 0.2),
-    lookAt: new THREE.Vector3(0, 1.85, -3.6),
+    position: new THREE.Vector3(0, 1.5, 0.7),
+    lookAt: new THREE.Vector3(0, 1.05, -1.5),
   },
   waiting: {
     position: new THREE.Vector3(0, 1.55, 0),
     lookAt: new THREE.Vector3(3.6, 1.85, 0),
   },
-  purchased: {
+  buy: {
     position: new THREE.Vector3(0, 1.55, 0),
     lookAt: new THREE.Vector3(-3.6, 1.85, 0),
-  },
-  recently: {
-    position: new THREE.Vector3(0, 1.55, 0),
-    lookAt: new THREE.Vector3(0, 1.85, 3.6),
   },
 };
 
@@ -522,7 +518,7 @@ function App() {
 
     setProducts(capturedProducts);
     setSelectedId(null);
-    setView("recently");
+    setView("buy");
     setNotification(
       visibleCount
         ? `${visibleCount} saved product${visibleCount === 1 ? "" : "s"} loaded from ${site}.`
@@ -557,10 +553,8 @@ function App() {
 
   const counts = useMemo(() => {
     const c: Record<Shelf, number> = {
-      "Worth It": 0,
+      Buy: 0,
       "Waiting for a Sale": 0,
-      Purchased: 0,
-      "Recently Added": 0,
     };
     products.forEach((p) => (c[p.shelf] += 1));
     return c;
@@ -704,11 +698,12 @@ function Scene({
       <Room />
       <WallShelves setView={setView} />
       <CardWall products={products} onOpen={onOpen} />
-      <IslandCounter isAnalyzing={isAnalyzing} setView={setView} />
-      <Dragon isAnalyzing={isAnalyzing} setView={setView} />
-      <Cat position={[0.95, 0.66, -1.05]} />
-      <Dog position={[-1.4, 0.0, -0.35]} />
-      <Bird position={[-0.85, 0.66, -1.0]} />
+
+      <Suspense fallback={null}>
+        <Desk setView={setView} />
+        <Retsuko isAnalyzing={isAnalyzing} setView={setView} />
+      </Suspense>
+
       <CornerPlants />
 
       <Sparkles
@@ -754,9 +749,11 @@ function CameraRig({ view }: { view: CameraView }) {
     };
     const move = (e: PointerEvent) => {
       if (!drag.current) return;
-      yaw.current -= e.movementX * sens;
+      const xSign = INVERT_DRAG_X ? -1 : 1;
+      const ySign = INVERT_DRAG_Y ? -1 : 1;
+      yaw.current += e.movementX * sens * xSign;
       pitch.current = THREE.MathUtils.clamp(
-        pitch.current - e.movementY * sens,
+        pitch.current - e.movementY * sens * ySign,
         -Math.PI / 3.2,
         Math.PI / 3.2,
       );
@@ -971,10 +968,8 @@ function CardWall({
 }) {
   const groups = useMemo(() => {
     const g: Record<Shelf, Product[]> = {
-      "Worth It": [],
+      Buy: [],
       "Waiting for a Sale": [],
-      Purchased: [],
-      "Recently Added": [],
     };
     products.forEach((p) => g[p.shelf].push(p));
     return g;
@@ -1055,498 +1050,87 @@ function CardWall({
   );
 }
 
-/* ---------------------------- island counter ---------------------------- */
+/* ---------------------------- GLB desk + Retsuko ---------------------------- */
 
-function IslandCounter({
-  isAnalyzing,
-  setView,
-}: {
-  isAnalyzing: boolean;
-  setView: (v: CameraView) => void;
-}) {
-  return (
-    <ClickableGroup onClick={() => setView("register")}>
-      <group position={[0, 0, -1.15]}>
-        {/* counter body */}
-        <mesh castShadow receiveShadow position={[0, 0.32, 0]}>
-          <boxGeometry args={[2.1, 0.64, 1.0]} />
-          <meshStandardMaterial color="#a98fd0" roughness={0.8} flatShading />
-        </mesh>
-        {/* counter top */}
-        <mesh castShadow position={[0, 0.67, 0]}>
-          <boxGeometry args={[2.26, 0.1, 1.14]} />
-          <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
-        </mesh>
-        {/* retro monitor */}
-        <group position={[0.62, 0.85, 0.05]} rotation={[0, -0.3, 0]}>
-          <mesh castShadow>
-            <boxGeometry args={[0.5, 0.42, 0.36]} />
-            <meshStandardMaterial color="#e9dcc4" roughness={0.7} flatShading />
-          </mesh>
-          <mesh position={[0, 0.02, 0.19]}>
-            <boxGeometry args={[0.38, 0.28, 0.02]} />
-            <meshStandardMaterial
-              color="#20301f"
-              emissive="#1c2b1b"
-              emissiveIntensity={0.5}
-              flatShading
-            />
-          </mesh>
-          <Html
-            position={[0, 0.02, 0.21]}
-            center
-            distanceFactor={2.2}
-            zIndexRange={[10, 0]}
-          >
-            <div className="bc-crt">
-              <div>QUALITY {isAnalyzing ? "████" : "██▚▚"}</div>
-              <div>PRICE&nbsp;&nbsp; {isAnalyzing ? "███▚" : "██▚▚"}</div>
-              <div>HYPE&nbsp;&nbsp;&nbsp; {isAnalyzing ? "██▚▚" : "█▚▚▚"}</div>
-              <div className="bc-crt-grade">{isAnalyzing ? "B+" : "A"}</div>
-            </div>
-          </Html>
-        </group>
-        {/* scanner */}
-        <Scanner isAnalyzing={isAnalyzing} />
-        {/* mug */}
-        <group position={[-0.05, 0.78, 0.32]}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.08, 0.07, 0.14, 6]} />
-            <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
-          </mesh>
-        </group>
-      </group>
-    </ClickableGroup>
-  );
-}
-
-function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
-  const ring = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    if (!ring.current) return;
-    ring.current.rotation.z = s.clock.elapsedTime * 2;
-    ring.current.scale.setScalar(
-      1 + Math.sin(s.clock.elapsedTime * 4) * (isAnalyzing ? 0.12 : 0.03),
-    );
-  });
-  return (
-    <group position={[-0.6, 0.74, 0.05]}>
-      <mesh castShadow>
-        <boxGeometry args={[0.42, 0.1, 0.34]} />
-        <meshStandardMaterial color="#9c7c52" roughness={0.8} flatShading />
-      </mesh>
-      <mesh ref={ring} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.15, 0.012, 6, 18]} />
-        <meshStandardMaterial
-          color={isAnalyzing ? "#ffd591" : "#e8c79d"}
-          emissive={isAnalyzing ? "#ffc46d" : "#7a4f30"}
-          emissiveIntensity={isAnalyzing ? 1 : 0.15}
-          flatShading
-        />
-      </mesh>
-      {isAnalyzing && (
-        <Sparkles
-          count={20}
-          scale={[0.5, 0.5, 0.5]}
-          size={2}
-          speed={0.5}
-          color="#ffe4a8"
-          position={[0, 0.3, 0]}
-        />
-      )}
-    </group>
-  );
-}
-
-/* ------------------------- low-poly dragon (Sprout) ------------------------- */
-
-function Dragon({
-  isAnalyzing,
-  setView,
-}: {
-  isAnalyzing: boolean;
-  setView: (v: CameraView) => void;
-}) {
-  const root = useRef<THREE.Group>(null);
-  const head = useRef<THREE.Group>(null);
-  const lEye = useRef<THREE.Mesh>(null);
-  const rEye = useRef<THREE.Mesh>(null);
-  const [blink, setBlink] = useState(false);
+function Desk({ setView }: { setView: (v: CameraView) => void }) {
+  const { scene } = useGLTF(DESK_MODEL_URL);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setBlink(true);
-      window.setTimeout(() => setBlink(false), 120);
-    }, 3600);
-    return () => window.clearInterval(id);
-  }, []);
-
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (root.current) {
-      root.current.position.y = 0.66 + Math.sin(t * 1.7) * 0.02;
-      root.current.rotation.z = Math.sin(t * 1.1) * 0.02;
-    }
-    if (head.current) {
-      head.current.rotation.z = Math.sin(t * 0.7) * 0.05;
-      head.current.rotation.x =
-        (isAnalyzing ? 0.1 : 0) + Math.sin(t * 0.9) * 0.02;
-    }
-    const shift = THREE.MathUtils.clamp(
-      s.camera.position.x * 0.02,
-      -0.03,
-      0.03,
-    );
-    if (lEye.current) lEye.current.position.x = -0.1 + shift;
-    if (rEye.current) rEye.current.position.x = 0.1 + shift;
-  });
-
-  const G = "#93cc74";
-  const GD = "#6fb257";
-  const BELLY = "#d0e9b1";
-  const HORN = "#c7cf63";
-  const RED = "#e2473c";
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    });
+  }, [scene]);
 
   return (
     <ClickableGroup onClick={() => setView("register")}>
-      {/* stands behind the counter, facing the room */}
-      <group
-        ref={root}
-        position={[0, 0.66, -0.62]}
-        rotation={[0, Math.PI, 0]}
-        scale={1.05}
-      >
-        {/* body */}
-        <mesh castShadow position={[0, -0.12, 0]} scale={[1, 1.08, 0.92]}>
-          <icosahedronGeometry args={[0.34, 1]} />
-          <meshStandardMaterial color={G} roughness={0.75} flatShading />
-        </mesh>
-        {/* belly */}
-        <mesh position={[0, -0.14, -0.24]} scale={[0.6, 0.72, 0.4]}>
-          <icosahedronGeometry args={[0.34, 1]} />
-          <meshStandardMaterial color={BELLY} roughness={0.8} flatShading />
-        </mesh>
-        {/* arms */}
-        {[-0.3, 0.3].map((x) => (
-          <mesh
-            key={x}
-            castShadow
-            position={[x, -0.2, -0.14]}
-            scale={[0.11, 0.14, 0.11]}
-          >
-            <icosahedronGeometry args={[1, 0]} />
-            <meshStandardMaterial color={G} roughness={0.75} flatShading />
-          </mesh>
-        ))}
-        {/* wings (flat tri membranes) */}
-        {[-1, 1].map((s) => (
-          <mesh
-            key={s}
-            castShadow
-            position={[s * 0.32, 0.0, 0.12]}
-            rotation={[0.2, s * 0.6, s * -0.5]}
-            scale={[0.24, 0.28, 0.02]}
-          >
-            <coneGeometry args={[1, 1.2, 3]} />
-            <meshStandardMaterial
-              color={GD}
-              roughness={0.8}
-              flatShading
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-        ))}
-
-        {/* head */}
-        <group ref={head} position={[0, 0.22, -0.02]}>
-          <mesh castShadow scale={[1.15, 0.98, 1]}>
-            <icosahedronGeometry args={[0.32, 1]} />
-            <meshStandardMaterial color={G} roughness={0.72} flatShading />
-          </mesh>
-          {/* snout */}
-          <mesh
-            castShadow
-            position={[0, -0.06, -0.26]}
-            scale={[0.85, 0.6, 0.5]}
-          >
-            <icosahedronGeometry args={[0.2, 0]} />
-            <meshStandardMaterial color={BELLY} roughness={0.78} flatShading />
-          </mesh>
-          {/* mouth */}
-          <mesh position={[0, -0.12, -0.38]}>
-            <boxGeometry args={[0.08, 0.012, 0.01]} />
-            <meshStandardMaterial color={GD} />
-          </mesh>
-          {/* cheeks */}
-          {[-0.19, 0.19].map((x) => (
-            <mesh key={x} position={[x, -0.04, -0.2]}>
-              <icosahedronGeometry args={[0.05, 0]} />
-              <meshStandardMaterial
-                color="#f2a9ba"
-                roughness={0.8}
-                flatShading
-              />
-            </mesh>
-          ))}
-          {/* eyes */}
-          <mesh
-            ref={lEye}
-            position={[-0.1, 0.05, -0.29]}
-            scale={[1, blink ? 0.12 : 1, 1]}
-          >
-            <icosahedronGeometry args={[0.045, 0]} />
-            <meshStandardMaterial color="#2a2320" roughness={0.4} flatShading />
-          </mesh>
-          <mesh
-            ref={rEye}
-            position={[0.1, 0.05, -0.29]}
-            scale={[1, blink ? 0.12 : 1, 1]}
-          >
-            <icosahedronGeometry args={[0.045, 0]} />
-            <meshStandardMaterial color="#2a2320" roughness={0.4} flatShading />
-          </mesh>
-          <mesh position={[-0.085, 0.07, -0.315]}>
-            <icosahedronGeometry args={[0.013, 0]} />
-            <meshBasicMaterial color="#ffffff" />
-          </mesh>
-          <mesh position={[0.115, 0.07, -0.315]}>
-            <icosahedronGeometry args={[0.013, 0]} />
-            <meshBasicMaterial color="#ffffff" />
-          </mesh>
-          {/* round red glasses */}
-          {[-0.1, 0.1].map((x) => (
-            <mesh
-              key={x}
-              position={[x, 0.05, -0.3]}
-              rotation={[Math.PI / 2, 0, 0]}
-            >
-              <torusGeometry args={[0.085, 0.012, 6, 20]} />
-              <meshStandardMaterial color={RED} roughness={0.4} flatShading />
-            </mesh>
-          ))}
-          <mesh position={[0, 0.05, -0.3]}>
-            <boxGeometry args={[0.04, 0.014, 0.01]} />
-            <meshStandardMaterial color={RED} flatShading />
-          </mesh>
-          {/* horns */}
-          <mesh castShadow position={[0, 0.34, 0]} rotation={[0.1, 0, 0]}>
-            <coneGeometry args={[0.055, 0.2, 5]} />
-            <meshStandardMaterial color={HORN} roughness={0.7} flatShading />
-          </mesh>
-          {[-0.18, 0.18].map((x) => (
-            <mesh
-              key={x}
-              castShadow
-              position={[x, 0.27, 0]}
-              rotation={[0.1, 0, x < 0 ? 0.45 : -0.45]}
-            >
-              <coneGeometry args={[0.045, 0.16, 5]} />
-              <meshStandardMaterial color={HORN} roughness={0.7} flatShading />
-            </mesh>
-          ))}
-          {/* ear frills */}
-          {[-1, 1].map((s) => (
-            <mesh
-              key={s}
-              castShadow
-              position={[s * 0.31, 0.05, 0.02]}
-              rotation={[0, 0, s * -0.9]}
-            >
-              <coneGeometry args={[0.05, 0.16, 4]} />
-              <meshStandardMaterial color={BELLY} roughness={0.8} flatShading />
-            </mesh>
-          ))}
-        </group>
-
-        {/* bowtie */}
-        <group position={[0, 0.02, -0.28]}>
-          {[-1, 1].map((s) => (
-            <mesh
-              key={s}
-              castShadow
-              position={[s * 0.06, 0, 0]}
-              rotation={[0, 0, s * 0.4 + Math.PI / 2]}
-            >
-              <coneGeometry args={[0.05, 0.1, 3]} />
-              <meshStandardMaterial color={RED} roughness={0.5} flatShading />
-            </mesh>
-          ))}
-          <mesh castShadow>
-            <boxGeometry args={[0.04, 0.05, 0.05]} />
-            <meshStandardMaterial color="#c53a31" roughness={0.5} flatShading />
-          </mesh>
-        </group>
-
-        {isAnalyzing && (
-          <Sparkles
-            count={12}
-            scale={[0.6, 0.6, 0.6]}
-            size={1.6}
-            speed={0.4}
-            color="#ffe4a8"
-            position={[0, 0.35, 0]}
-          />
-        )}
-      </group>
+      <primitive
+        object={scene}
+        position={DESK_POSITION}
+        rotation={[0, DESK_ROTATION_Y, 0]}
+        scale={DESK_SCALE}
+      />
     </ClickableGroup>
   );
 }
 
-/* ------------------------------ friends ------------------------------ */
+function Retsuko({
+  isAnalyzing,
+  setView,
+}: {
+  isAnalyzing: boolean;
+  setView: (v: CameraView) => void;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const { scene, animations } = useGLTF(RETSUKO_MODEL_URL);
+  const { actions, names } = useAnimations(animations, group);
 
-function Cat({ position }: { position: [number, number, number] }) {
-  const tail = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (tail.current)
-      tail.current.rotation.z =
-        0.3 + Math.sin(s.clock.elapsedTime * 1.6) * 0.25;
-  });
-  const F = "#c6b4e3";
-  return (
-    <group position={position} scale={0.6}>
-      <mesh castShadow position={[0, -0.05, 0]} scale={[0.9, 1, 0.8]}>
-        <icosahedronGeometry args={[0.26, 0]} />
-        <meshStandardMaterial color={F} roughness={0.85} flatShading />
-      </mesh>
-      <mesh castShadow position={[0, 0.28, 0.04]}>
-        <icosahedronGeometry args={[0.22, 0]} />
-        <meshStandardMaterial color={F} roughness={0.85} flatShading />
-      </mesh>
-      {[-0.12, 0.12].map((x) => (
-        <mesh
-          key={x}
-          castShadow
-          position={[x, 0.46, 0.02]}
-          rotation={[0, 0, x < 0 ? 0.3 : -0.3]}
-        >
-          <coneGeometry args={[0.07, 0.14, 4]} />
-          <meshStandardMaterial color={F} roughness={0.85} flatShading />
-        </mesh>
-      ))}
-      {[-0.08, 0.08].map((x) => (
-        <mesh key={x} position={[x, 0.3, 0.2]}>
-          <icosahedronGeometry args={[0.028, 0]} />
-          <meshStandardMaterial color="#3a3040" flatShading />
-        </mesh>
-      ))}
-      <mesh position={[0, 0.25, 0.22]}>
-        <icosahedronGeometry args={[0.02, 0]} />
-        <meshStandardMaterial color="#f2a9ba" flatShading />
-      </mesh>
-      <group ref={tail} position={[0.18, -0.1, -0.14]}>
-        <mesh castShadow rotation={[0.6, 0, 0]} scale={[0.05, 0.05, 0.3]}>
-          <icosahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial color={F} roughness={0.85} flatShading />
-        </mesh>
-      </group>
-    </group>
-  );
-}
+  useEffect(() => {
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) mesh.castShadow = true;
+    });
+  }, [scene]);
 
-function Dog({ position }: { position: [number, number, number] }) {
-  const B = "#e6c68b";
-  const BD = "#d9b06a";
+  useEffect(() => {
+    if (!RETSUKO_PLAY_ANIMATION || !names.length) return;
+    const action = actions[names[0]];
+    if (!action) return;
+    action.reset().fadeIn(0.4).play();
+    return () => {
+      action.fadeOut(0.2);
+    };
+  }, [actions, names]);
+
   return (
-    <group position={position} scale={0.72}>
-      {/* haunches / body */}
-      <mesh castShadow position={[0, 0.24, 0]} scale={[0.9, 0.9, 1.05]}>
-        <icosahedronGeometry args={[0.3, 0]} />
-        <meshStandardMaterial color={B} roughness={0.85} flatShading />
-      </mesh>
-      {/* chest */}
-      <mesh castShadow position={[0, 0.18, 0.26]} scale={[0.7, 0.9, 0.7]}>
-        <icosahedronGeometry args={[0.24, 0]} />
-        <meshStandardMaterial color={B} roughness={0.85} flatShading />
-      </mesh>
-      {/* head */}
-      <mesh castShadow position={[0, 0.56, 0.28]}>
-        <icosahedronGeometry args={[0.22, 0]} />
-        <meshStandardMaterial color={B} roughness={0.85} flatShading />
-      </mesh>
-      {/* muzzle */}
-      <mesh castShadow position={[0, 0.5, 0.46]} scale={[0.55, 0.5, 0.6]}>
-        <icosahedronGeometry args={[0.16, 0]} />
-        <meshStandardMaterial color="#f2e2c4" roughness={0.85} flatShading />
-      </mesh>
-      <mesh position={[0, 0.5, 0.6]}>
-        <icosahedronGeometry args={[0.03, 0]} />
-        <meshStandardMaterial color="#3a2f28" flatShading />
-      </mesh>
-      {/* ears (floppy) */}
-      {[-1, 1].map((s) => (
-        <mesh
-          key={s}
-          castShadow
-          position={[s * 0.18, 0.6, 0.24]}
-          rotation={[0.2, 0, s * 0.3]}
-          scale={[0.5, 1, 0.4]}
-        >
-          <coneGeometry args={[0.1, 0.24, 4]} />
-          <meshStandardMaterial color={BD} roughness={0.85} flatShading />
-        </mesh>
-      ))}
-      {[-0.08, 0.08].map((x) => (
-        <mesh key={x} position={[x, 0.6, 0.44]}>
-          <icosahedronGeometry args={[0.026, 0]} />
-          <meshStandardMaterial color="#3a2f28" flatShading />
-        </mesh>
-      ))}
-      {/* front legs */}
-      {[-0.12, 0.12].map((x) => (
-        <mesh
-          key={x}
-          castShadow
-          position={[x, 0.08, 0.4]}
-          scale={[0.09, 0.16, 0.09]}
-        >
-          <icosahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial color={B} roughness={0.85} flatShading />
-        </mesh>
-      ))}
-      {/* tail */}
-      <mesh
-        castShadow
-        position={[0, 0.34, -0.28]}
-        rotation={[0.7, 0, 0]}
-        scale={[0.06, 0.06, 0.24]}
+    <ClickableGroup onClick={() => setView("register")}>
+      <group
+        ref={group}
+        position={RETSUKO_POSITION}
+        rotation={[0, RETSUKO_ROTATION_Y, 0]}
+        scale={RETSUKO_SCALE}
       >
-        <icosahedronGeometry args={[1, 0]} />
-        <meshStandardMaterial color={BD} roughness={0.85} flatShading />
-      </mesh>
-    </group>
+        <primitive object={scene} />
+      </group>
+      {isAnalyzing && (
+        <Sparkles
+          count={16}
+          scale={[0.9, 1.3, 0.9]}
+          size={2.4}
+          speed={0.4}
+          color="#ffe4a8"
+          position={[RETSUKO_POSITION[0], RETSUKO_POSITION[1] + 1.7, RETSUKO_POSITION[2]]}
+        />
+      )}
+    </ClickableGroup>
   );
 }
 
-function Bird({ position }: { position: [number, number, number] }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (g.current)
-      g.current.position.y =
-        position[1] + Math.sin(s.clock.elapsedTime * 3) * 0.015;
-  });
-  return (
-    <group ref={g} position={position} scale={0.5}>
-      <mesh castShadow scale={[0.9, 1, 0.9]}>
-        <icosahedronGeometry args={[0.2, 0]} />
-        <meshStandardMaterial color="#f2d17a" roughness={0.8} flatShading />
-      </mesh>
-      {[-0.06, 0.06].map((x) => (
-        <mesh key={x} position={[x, 0.05, 0.16]}>
-          <icosahedronGeometry args={[0.025, 0]} />
-          <meshStandardMaterial color="#3a3026" flatShading />
-        </mesh>
-      ))}
-      <mesh position={[0, 0.0, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.03, 0.08, 4]} />
-        <meshStandardMaterial color="#e0a94e" flatShading />
-      </mesh>
-      <mesh castShadow position={[0, 0.2, 0]}>
-        <coneGeometry args={[0.05, 0.09, 4]} />
-        <meshStandardMaterial color="#e6b45c" flatShading />
-      </mesh>
-    </group>
-  );
-}
+useGLTF.preload(DESK_MODEL_URL);
+useGLTF.preload(RETSUKO_MODEL_URL);
 
 function CornerPlants() {
   const spots: [number, number, number][] = [
