@@ -61,9 +61,6 @@ function CrosshairCursor({ className = '' }: CrosshairCursorProps) {
     >
       <span className="crosshair-cursor__mark">
         <span className="crosshair-cursor__ring" />
-        <span className="crosshair-cursor__line crosshair-cursor__line--horizontal" />
-        <span className="crosshair-cursor__line crosshair-cursor__line--vertical" />
-        <span className="crosshair-cursor__dot" />
       </span>
     </motion.div>
   )
