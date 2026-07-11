@@ -1,104 +1,28 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --muted: #8f879a;
-  --bg: #f8f2e9;
-  --panel: rgba(255, 255, 255, 0.78);
-  --card: #fffaf4;
-  --image-bg: #f1e7dc;
-  --border: #e5e4e7;
-  --accent: #cb5f2f;
-  --shadow:
-    rgba(78, 42, 18, 0.08) 0 24px 50px -24px, rgba(78, 42, 18, 0.08) 0 8px 20px -12px;
-
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
+  color: #604832;
+  background: #f8ead8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --muted: #8f96a3;
-    --bg: #111317;
-    --panel: rgba(27, 30, 37, 0.82);
-    --card: #171a20;
-    --image-bg: #222733;
-    --border: #2e303a;
-    --accent: #f59e0b;
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
 }
 
 #root {
+  width: 100%;
   min-height: 100svh;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 34rem),
-    radial-gradient(circle at bottom right, rgba(203, 95, 47, 0.18), transparent 30rem),
-    var(--bg);
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: clamp(42px, 7vw, 84px);
-  line-height: 0.95;
-  letter-spacing: -1.68px;
-  margin: 0 0 24px;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-button {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  min-width: 320px;
+  min-height: 100svh;
+  overflow: hidden;
+  font-family: var(--sans);
 }

@@ -1,211 +1,1205 @@
-import { useEffect, useState } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import {
+  ContactShadows,
+  Float,
+  RoundedBox,
+  Sparkles,
+  Text,
+  useCursor,
+  useGLTF,
+} from '@react-three/drei'
+import gsap from 'gsap'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import * as THREE from 'three'
+import CrosshairCursor from './components/CrosshairCursor'
 import './App.css'
 
-const BLOOMCART_EXTENSION_ID = 'naflnfaamlcdjakgmhaiggmolhceiaok'
-const POLL_INTERVAL_MS = 2000
+type CameraView = 'default' | 'register' | 'waiting' | 'worth' | 'dragon' | 'product'
 
 type Product = {
-  name: string | null
-  price: string | null
-  quantity: string | null
-  image: string | null
-  link: string | null
+  id: string
+  name: string
+  price: string
+  lowest: string
+  rating: string
+  verdict: string
+  saleDate: string
+  badge: string
+  shelf: 'Worth It' | 'Waiting for a Sale' | 'Purchased' | 'Recently Added'
+  colorA: string
+  colorB: string
+  position: [number, number, number]
+  graph: number[]
+  isNew?: boolean
 }
 
-type CartCapture = {
-  supportedSite: string
-  sourceUrl: string
-  extractedAt: string
-  capturedByExtensionAt?: string
-  productCount: number
-  products: Product[]
+const cameraViews: Record<Exclude<CameraView, 'product'>, { position: THREE.Vector3; lookAt: THREE.Vector3 }> = {
+  default: {
+    position: new THREE.Vector3(0, 1.75, 5.6),
+    lookAt: new THREE.Vector3(0, 1.15, -0.9),
+  },
+  register: {
+    position: new THREE.Vector3(0, 1.35, 3.1),
+    lookAt: new THREE.Vector3(0, 1.0, 0.65),
+  },
+  waiting: {
+    position: new THREE.Vector3(-2.25, 1.75, 1.1),
+    lookAt: new THREE.Vector3(-2.25, 1.35, -2.45),
+  },
+  worth: {
+    position: new THREE.Vector3(2.25, 1.75, 1.1),
+    lookAt: new THREE.Vector3(2.25, 1.35, -2.45),
+  },
+  dragon: {
+    position: new THREE.Vector3(0.05, 1.45, 2.35),
+    lookAt: new THREE.Vector3(0, 1.28, -0.55),
+  },
 }
 
-type ExtensionResponse = {
-  ok: boolean
-  cart?: CartCapture | null
-  error?: string
-}
+const initialProducts: Product[] = [
+  {
+    id: 'linen-tote',
+    name: 'Linen Market Tote',
+    price: '$34',
+    lowest: '$27',
+    rating: '92 / 100',
+    verdict: 'Worth it now',
+    saleDate: 'Jul 18',
+    badge: 'Worth It',
+    shelf: 'Worth It',
+    colorA: '#dcbf91',
+    colorB: '#879f7a',
+    position: [1.45, 2.05, -2.66],
+    graph: [0.38, 0.45, 0.41, 0.35, 0.3],
+  },
+  {
+    id: 'matcha-mug',
+    name: 'Matcha Ceramic Mug',
+    price: '$22',
+    lowest: '$18',
+    rating: '88 / 100',
+    verdict: 'Cozy pick',
+    saleDate: 'Jul 24',
+    badge: 'Worth It',
+    shelf: 'Worth It',
+    colorA: '#cbd7b3',
+    colorB: '#f6dec8',
+    position: [2.35, 2.05, -2.66],
+    graph: [0.5, 0.43, 0.44, 0.37, 0.33],
+  },
+  {
+    id: 'desk-lamp',
+    name: 'Brass Reading Lamp',
+    price: '$78',
+    lowest: '$61',
+    rating: '84 / 100',
+    verdict: 'Wait one drop',
+    saleDate: 'Aug 02',
+    badge: 'Waiting',
+    shelf: 'Waiting for a Sale',
+    colorA: '#c89253',
+    colorB: '#f3dca6',
+    position: [-2.35, 2.05, -2.66],
+    graph: [0.75, 0.72, 0.64, 0.58, 0.52],
+  },
+  {
+    id: 'wool-rug',
+    name: 'Mini Wool Rug',
+    price: '$96',
+    lowest: '$72',
+    rating: '80 / 100',
+    verdict: 'Watch closely',
+    saleDate: 'Aug 09',
+    badge: 'Waiting',
+    shelf: 'Waiting for a Sale',
+    colorA: '#b98d8d',
+    colorB: '#8aa6b5',
+    position: [-1.45, 2.05, -2.66],
+    graph: [0.8, 0.72, 0.7, 0.62, 0.55],
+  },
+  {
+    id: 'plush-fox',
+    name: 'Pocket Fox Plush',
+    price: '$19',
+    lowest: '$15',
+    rating: '95 / 100',
+    verdict: 'Purchased joy',
+    saleDate: 'Bought',
+    badge: 'Purchased',
+    shelf: 'Purchased',
+    colorA: '#d78d68',
+    colorB: '#fff0d9',
+    position: [-0.45, 0.95, -2.66],
+    graph: [0.48, 0.41, 0.39, 0.36, 0.32],
+  },
+  {
+    id: 'paper-notes',
+    name: 'Handmade Notes',
+    price: '$12',
+    lowest: '$9',
+    rating: '90 / 100',
+    verdict: 'Lovely refill',
+    saleDate: 'Jul 29',
+    badge: 'Added',
+    shelf: 'Recently Added',
+    colorA: '#ead9a8',
+    colorB: '#b5a1c8',
+    position: [0.45, 0.95, -2.66],
+    graph: [0.55, 0.49, 0.47, 0.42, 0.36],
+  },
+]
 
-type ConnectionStatus = 'checking' | 'connected' | 'empty' | 'disconnected'
-
-declare global {
-  interface Window {
-    chrome?: {
-      runtime?: {
-        lastError?: { message?: string }
-        sendMessage?: (
-          extensionId: string,
-          message: { type: string },
-          callback: (response?: ExtensionResponse) => void,
-        ) => void
-      }
-    }
-  }
-}
-
-function formatDate(value?: string) {
-  if (!value) {
-    return 'Not captured yet'
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(new Date(value))
-}
+const ArchiveScene = lazy(async () => ({ default: Scene }))
 
 function App() {
-  const [cart, setCart] = useState<CartCapture | null>(null)
-  const [status, setStatus] = useState<ConnectionStatus>('checking')
-  const [message, setMessage] = useState('Connecting to the BloomCart extension...')
+  const [view, setView] = useState<CameraView>('default')
+  const [products, setProducts] = useState<Product[]>(initialProducts)
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [notification, setNotification] = useState('Dragon archivist is ready.')
+
+  const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null
 
   useEffect(() => {
-    let stopped = false
-
-    function pollExtension() {
-      if (!window.chrome?.runtime?.sendMessage) {
-        setStatus('disconnected')
-        setMessage('Chrome runtime is unavailable. Open this page in Chrome with the BloomCart extension installed.')
-        return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedProductId(null)
+        setView('default')
       }
-
-      window.chrome.runtime.sendMessage(
-        BLOOMCART_EXTENSION_ID,
-        { type: 'BLOOMCART_GET_LATEST_CART' },
-        (response) => {
-          if (stopped) {
-            return
-          }
-
-          const runtimeError = window.chrome?.runtime?.lastError?.message
-
-          if (runtimeError) {
-            setStatus('disconnected')
-            setMessage(`Extension not connected: ${runtimeError}`)
-            return
-          }
-
-          if (!response?.ok) {
-            setStatus('disconnected')
-            setMessage(response?.error || 'The BloomCart extension did not return cart data.')
-            return
-          }
-
-          setCart(response.cart ?? null)
-
-          if (response.cart) {
-            setStatus('connected')
-            setMessage(`Live cart data from ${response.cart.supportedSite}`)
-          } else {
-            setStatus('empty')
-            setMessage('Extension connected. Waiting for a supported cart page capture.')
-          }
-        },
-      )
     }
 
-    pollExtension()
-    const intervalId = window.setInterval(pollExtension, POLL_INTERVAL_MS)
-
-    return () => {
-      stopped = true
-      window.clearInterval(intervalId)
-    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const products = cart?.products ?? []
+  const handleUpload = () => {
+    setIsAnalyzing(true)
+    setSelectedProductId(null)
+    setView('register')
+    setNotification('Cart upload received. Scanner is warming up...')
+
+    window.setTimeout(() => {
+      const uploadedProduct: Product = {
+        id: `uploaded-teapot-${Date.now()}`,
+        name: 'Blueberry Teapot',
+        price: '$42',
+        lowest: '$36',
+        rating: '91 / 100',
+        verdict: 'Save to Worth It',
+        saleDate: 'Jul 21',
+        badge: 'New',
+        shelf: 'Recently Added',
+        colorA: '#9cbad6',
+        colorB: '#d9b3d7',
+        position: [1.35, 0.95, -2.66],
+        graph: [0.64, 0.56, 0.51, 0.48, 0.41],
+        isNew: true,
+      }
+
+      setProducts((currentProducts) => [
+        ...currentProducts.filter((product) => !product.id.startsWith('uploaded-teapot-')),
+        uploadedProduct,
+      ])
+      setSelectedProductId(uploadedProduct.id)
+      setView('product')
+      setNotification('Blueberry Teapot archived in Recently Added.')
+      setIsAnalyzing(false)
+    }, 3300)
+  }
 
   return (
     <main className="app-shell">
-      <section className="hero-panel">
-        <div>
-          <p className="eyebrow">BloomCart Extension Dashboard</p>
-          <h1>Live cart capture</h1>
-          <p className="lede">
-            Keep this page open while shopping. Supported cart pages update here automatically through the
-            Chrome extension runtime.
-          </p>
-        </div>
-        <div className={`status-card status-${status}`}>
-          <span className="status-dot" />
-          <div>
-            <strong>{status === 'connected' ? 'Connected' : status === 'empty' ? 'Listening' : 'Not connected'}</strong>
-            <p>{message}</p>
-          </div>
-        </div>
-      </section>
+      <div className="world-frame">
+        <Canvas
+          shadows
+          dpr={[1, 1.8]}
+          camera={{ position: [0, 2.4, 7], fov: 43, near: 0.1, far: 100 }}
+          gl={{ antialias: true }}
+        >
+          <color attach="background" args={['#f5ead8']} />
+          <Suspense fallback={<LoadingRoom />}>
+            <ArchiveScene
+              isAnalyzing={isAnalyzing}
+              products={products}
+              selectedProduct={selectedProduct}
+              selectedProductId={selectedProductId}
+              setSelectedProductId={setSelectedProductId}
+              setView={setView}
+              view={view}
+            />
+          </Suspense>
+        </Canvas>
+      </div>
+      <CrosshairCursor />
 
-      <section className="summary-grid" aria-label="Latest capture summary">
-        <article>
-          <span>Supported site</span>
-          <strong>{cart?.supportedSite ?? 'None yet'}</strong>
-        </article>
-        <article>
-          <span>Products</span>
-          <strong>{cart?.productCount ?? 0}</strong>
-        </article>
-        <article>
-          <span>Extracted</span>
-          <strong>{formatDate(cart?.extractedAt)}</strong>
-        </article>
-      </section>
+      <nav className="top-controls" aria-label="BloomCart controls">
+        <button type="button" onClick={handleUpload}>Upload Cart</button>
+        <button type="button" onClick={() => setView('default')}>Settings</button>
+        <button type="button" className="notification-pill">{notification}</button>
+      </nav>
 
-      {cart?.sourceUrl && (
-        <section className="source-panel">
-          <span>Source cart page</span>
-          <a href={cart.sourceUrl} target="_blank" rel="noreferrer">
-            {cart.sourceUrl}
-          </a>
-        </section>
-      )}
-
-      <section className="products-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Captured Products</p>
-            <h2>{products.length ? `${products.length} item${products.length === 1 ? '' : 's'}` : 'No cart data yet'}</h2>
-          </div>
-          {cart?.capturedByExtensionAt && <time>{formatDate(cart.capturedByExtensionAt)}</time>}
-        </div>
-
-        {products.length ? (
-          <div className="product-list">
-            {products.map((product, index) => (
-              <article className="product-card" key={`${product.name}-${product.price}-${product.link}-${index}`}>
-                <div className="product-image">
-                  {product.image ? <img src={product.image} alt="" /> : <span>No image</span>}
-                </div>
-                <div className="product-copy">
-                  <h3>{product.name || 'Unnamed product'}</h3>
-                  <dl>
-                    <div>
-                      <dt>Price</dt>
-                      <dd>{product.price || 'Unknown'}</dd>
-                    </div>
-                    <div>
-                      <dt>Quantity</dt>
-                      <dd>{product.quantity || 'Unknown'}</dd>
-                    </div>
-                  </dl>
-                  {product.link && (
-                    <a href={product.link} target="_blank" rel="noreferrer">
-                      Open product
-                    </a>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>Waiting for cart items</strong>
-            <p>Open a supported cart page in Chrome: Amazon, Walmart, or Target.</p>
-          </div>
-        )}
-      </section>
+      <button
+        type="button"
+        className="back-control"
+        onClick={() => {
+          setSelectedProductId(null)
+          setView('default')
+        }}
+      >
+        Back / ESC
+      </button>
     </main>
   )
 }
+
+function Scene({
+  isAnalyzing,
+  products,
+  selectedProduct,
+  selectedProductId,
+  setSelectedProductId,
+  setView,
+  view,
+}: {
+  isAnalyzing: boolean
+  products: Product[]
+  selectedProduct: Product | null
+  selectedProductId: string | null
+  setSelectedProductId: (id: string | null) => void
+  setView: (view: CameraView) => void
+  view: CameraView
+}) {
+  return (
+    <>
+      <CameraRig selectedProduct={selectedProduct} view={view} />
+      <ambientLight intensity={0.9} color="#f7dfbd" />
+      <directionalLight
+        castShadow
+        color="#ffd49a"
+        intensity={2.7}
+        position={[-3.8, 5.4, 4.6]}
+        shadow-mapSize={[2048, 2048]}
+      />
+      <pointLight color="#ffd28d" intensity={2.2} position={[2.7, 2.55, 0.4]} distance={5.5} />
+      <pointLight color="#ffdcaa" intensity={1.5} position={[-2.8, 1.9, -1.35]} distance={3.5} />
+
+      <RoomShell />
+      <Decorations />
+      <ArchiveShelves
+        products={products}
+        selectedProductId={selectedProductId}
+        setSelectedProductId={setSelectedProductId}
+        setView={setView}
+      />
+      <RegisterArea isAnalyzing={isAnalyzing} setView={setView} />
+      <Dragon isAnalyzing={isAnalyzing} setView={setView} />
+      <FloatingDust />
+      <ContactShadows opacity={0.28} scale={9} blur={2.6} far={4.5} position={[0, 0.012, 0]} />
+    </>
+  )
+}
+
+function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null; view: CameraView }) {
+  const { camera, gl, mouse } = useThree()
+  const basePosition = useRef(new THREE.Vector3(0, 2.35, 7))
+  const targetYaw = useRef(0)
+  const targetPitch = useRef(0)
+  const smoothYaw = useRef(0)
+  const smoothPitch = useRef(0)
+  const smoothMouse = useRef(new THREE.Vector2())
+  const desiredPosition = useRef(new THREE.Vector3())
+  const desiredLookAt = useRef(new THREE.Vector3())
+  const parallaxOffset = useRef(new THREE.Vector3())
+  const lookDirection = useRef(new THREE.Vector3())
+  const dragState = useRef({ active: false, moved: 0 })
+
+  useEffect(() => {
+    const canvas = gl.domElement
+    const sensitivity = 0.0032
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      dragState.current.active = true
+      dragState.current.moved = 0
+      canvas.setPointerCapture(event.pointerId)
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragState.current.active) return
+      dragState.current.moved += Math.abs(event.movementX) + Math.abs(event.movementY)
+      targetYaw.current -= event.movementX * sensitivity
+      targetPitch.current = THREE.MathUtils.clamp(
+        targetPitch.current - event.movementY * sensitivity,
+        -Math.PI / 2.7,
+        Math.PI / 2.7,
+      )
+    }
+
+    const stopDragging = (event: PointerEvent) => {
+      dragState.current.active = false
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown)
+    canvas.addEventListener('pointermove', handlePointerMove)
+    canvas.addEventListener('pointerup', stopDragging)
+    canvas.addEventListener('pointercancel', stopDragging)
+
+    return () => {
+      canvas.removeEventListener('pointerdown', handlePointerDown)
+      canvas.removeEventListener('pointermove', handlePointerMove)
+      canvas.removeEventListener('pointerup', stopDragging)
+      canvas.removeEventListener('pointercancel', stopDragging)
+    }
+  }, [gl])
+
+  useEffect(() => {
+    const target =
+      view === 'product' && selectedProduct
+        ? {
+            position: new THREE.Vector3(
+              selectedProduct.position[0],
+              selectedProduct.position[1] + 0.18,
+              selectedProduct.position[2] + 1.95,
+            ),
+            lookAt: new THREE.Vector3(...selectedProduct.position),
+          }
+        : cameraViews[view === 'product' ? 'default' : view]
+    const facing = getCameraAngles(target.position, target.lookAt)
+
+    gsap.to(basePosition.current, {
+      x: target.position.x,
+      y: target.position.y,
+      z: target.position.z,
+      duration: 1.9,
+      ease: 'power3.inOut',
+    })
+    gsap.to(targetYaw, {
+      current: facing.yaw,
+      duration: 1.9,
+      ease: 'power3.inOut',
+    })
+    gsap.to(targetPitch, {
+      current: facing.pitch,
+      duration: 1.9,
+      ease: 'power3.inOut',
+    })
+  }, [selectedProduct, view])
+
+  useFrame((_, delta) => {
+    const mouseBlend = 1 - Math.exp(-10 * delta)
+    const cameraBlend = 1 - Math.exp(-7.5 * delta)
+    const rotationBlend = 1 - Math.exp(-12 * delta)
+
+    smoothMouse.current.lerp(mouse, mouseBlend)
+    smoothYaw.current = THREE.MathUtils.lerp(smoothYaw.current, targetYaw.current, rotationBlend)
+    smoothPitch.current = THREE.MathUtils.lerp(smoothPitch.current, targetPitch.current, rotationBlend)
+    parallaxOffset.current.set(smoothMouse.current.x * 0.035, smoothMouse.current.y * 0.022, 0)
+    desiredPosition.current.copy(basePosition.current).add(parallaxOffset.current)
+    lookDirection.current.set(
+      Math.sin(smoothYaw.current) * Math.cos(smoothPitch.current),
+      Math.sin(smoothPitch.current),
+      -Math.cos(smoothYaw.current) * Math.cos(smoothPitch.current),
+    )
+    desiredLookAt.current.copy(desiredPosition.current).add(lookDirection.current)
+
+    camera.position.lerp(desiredPosition.current, cameraBlend)
+    camera.lookAt(desiredLookAt.current)
+  })
+
+  return null
+}
+
+function getCameraAngles(position: THREE.Vector3, lookAt: THREE.Vector3) {
+  const direction = lookAt.clone().sub(position).normalize()
+
+  return {
+    yaw: Math.atan2(direction.x, -direction.z),
+    pitch: Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)),
+  }
+}
+
+function LoadingRoom() {
+  return (
+    <group position={[0, 1.1, -1]}>
+      <Text color="#7b5e48" fontSize={0.18} anchorX="center">BloomCart archive is opening...</Text>
+    </group>
+  )
+}
+
+function RoomShell() {
+  return (
+    <group>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <planeGeometry args={[8.8, 8.2]} />
+        <meshStandardMaterial color="#c99f72" roughness={0.82} />
+      </mesh>
+      <mesh receiveShadow position={[0, 2.05, -3.05]}>
+        <boxGeometry args={[8.8, 4.1, 0.16]} />
+        <meshStandardMaterial color="#f1dfc7" roughness={0.9} />
+      </mesh>
+      <mesh receiveShadow position={[-4.35, 2.05, 0]}>
+        <boxGeometry args={[0.16, 4.1, 8.2]} />
+        <meshStandardMaterial color="#efe0cc" roughness={0.92} />
+      </mesh>
+      <mesh receiveShadow position={[4.35, 2.05, 0]}>
+        <boxGeometry args={[0.16, 4.1, 8.2]} />
+        <meshStandardMaterial color="#efe0cc" roughness={0.92} />
+      </mesh>
+      <mesh position={[-3.25, 2.62, -3.16]}>
+        <boxGeometry args={[1.22, 1.05, 0.08]} />
+        <meshStandardMaterial color="#ffe8bd" emissive="#ffc875" emissiveIntensity={0.32} />
+      </mesh>
+      <mesh position={[-3.25, 2.62, -3.1]}>
+        <boxGeometry args={[1.36, 1.18, 0.08]} />
+        <meshStandardMaterial color="#a87952" roughness={0.65} />
+      </mesh>
+      <mesh position={[-2.92, 2.62, -3.23]} rotation={[0, 0, -0.4]}>
+        <boxGeometry args={[0.05, 1.25, 0.04]} />
+        <meshStandardMaterial color="#fff1cf" emissive="#ffd080" emissiveIntensity={0.5} />
+      </mesh>
+      <mesh position={[-3.58, 2.62, -3.23]} rotation={[0, 0, 0.4]}>
+        <boxGeometry args={[0.05, 1.25, 0.04]} />
+        <meshStandardMaterial color="#fff1cf" emissive="#ffd080" emissiveIntensity={0.5} />
+      </mesh>
+      <Rug />
+    </group>
+  )
+}
+
+function Rug() {
+  return (
+    <group position={[0, 0.025, 2.15]} rotation={[-Math.PI / 2, 0, 0]}>
+      <RoundedBox args={[3.4, 1.72, 0.025]} radius={0.08} smoothness={8}>
+        <meshStandardMaterial color="#bd8f86" roughness={0.95} />
+      </RoundedBox>
+      {[-1.2, -0.6, 0, 0.6, 1.2].map((x) => (
+        <mesh key={x} position={[x, 0, 0.025]}>
+          <boxGeometry args={[0.045, 1.58, 0.012]} />
+          <meshStandardMaterial color="#e5ccb0" />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function RegisterArea({
+  isAnalyzing,
+  setView,
+}: {
+  isAnalyzing: boolean
+  setView: (view: CameraView) => void
+}) {
+  return (
+    <ClickableGroup onClick={() => setView('register')}>
+      <group position={[0, 0.48, 0.72]}>
+        <RoundedBox castShadow receiveShadow args={[2.55, 0.82, 1.1]} radius={0.08} smoothness={8}>
+          <meshStandardMaterial color="#b98959" roughness={0.72} />
+        </RoundedBox>
+        <mesh position={[0, 0.47, 0.04]}>
+          <boxGeometry args={[2.74, 0.08, 1.22]} />
+          <meshStandardMaterial color="#d7b17d" roughness={0.62} />
+        </mesh>
+        <group position={[-0.55, 0.66, -0.05]}>
+          <mesh castShadow rotation={[-0.35, 0, 0]}>
+            <boxGeometry args={[0.55, 0.38, 0.08]} />
+            <meshStandardMaterial color="#6f7f76" roughness={0.5} />
+          </mesh>
+          <Text position={[0, 0.04, 0.055]} rotation={[-0.35, 0, 0]} fontSize={0.045} color="#fff4d4" anchorX="center">
+            AI cart notes
+          </Text>
+        </group>
+        <Scanner isAnalyzing={isAnalyzing} />
+        <Keyboard isAnalyzing={isAnalyzing} />
+        <DeskObjects />
+        {isAnalyzing && <ScanProduct />}
+      </group>
+    </ClickableGroup>
+  )
+}
+
+function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
+  const ring = useRef<THREE.Mesh>(null)
+
+  useFrame((state) => {
+    if (!ring.current) return
+    ring.current.rotation.z = state.clock.elapsedTime * 2.2
+    ring.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 4) * 0.07)
+  })
+
+  return (
+    <group position={[0.35, 0.67, -0.07]}>
+      <RoundedBox castShadow args={[0.46, 0.13, 0.38]} radius={0.04} smoothness={8}>
+        <meshStandardMaterial color="#a77c52" roughness={0.78} />
+      </RoundedBox>
+      <mesh position={[0, 0.075, 0]} ref={ring} rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.18, 0.009, 8, 48]} />
+        <meshStandardMaterial
+          color={isAnalyzing ? '#ffd591' : '#e8c79d'}
+          emissive={isAnalyzing ? '#ffc46d' : '#8a5a38'}
+          emissiveIntensity={isAnalyzing ? 1 : 0.16}
+        />
+      </mesh>
+      {isAnalyzing && (
+        <Sparkles count={28} scale={[0.7, 0.45, 0.7]} size={2.2} speed={0.55} color="#ffe4a8" position={[0, 0.34, 0]} />
+      )}
+    </group>
+  )
+}
+
+function Keyboard({ isAnalyzing }: { isAnalyzing: boolean }) {
+  return (
+    <group position={[0, 0.66, 0.32]} rotation={[-0.1, 0, 0]}>
+      {Array.from({ length: 16 }, (_, index) => {
+        const x = (index % 8) * 0.07 - 0.245
+        const z = Math.floor(index / 8) * 0.07 - 0.035
+
+        return (
+          <KeyboardKey key={index} index={index} isAnalyzing={isAnalyzing} position={[x, 0, z]} />
+        )
+      })}
+    </group>
+  )
+}
+
+function KeyboardKey({
+  index,
+  isAnalyzing,
+  position,
+}: {
+  index: number
+  isAnalyzing: boolean
+  position: [number, number, number]
+}) {
+  const ref = useRef<THREE.Mesh>(null)
+
+  useFrame((state) => {
+    if (!ref.current) return
+    const tap = isAnalyzing && index % 5 === 0 ? Math.sin(state.clock.elapsedTime * 12 + index) * 0.01 : 0
+    ref.current.position.y = THREE.MathUtils.lerp(ref.current.position.y, tap, 0.28)
+  })
+
+  return (
+    <mesh ref={ref} castShadow position={position}>
+      <boxGeometry args={[0.052, 0.018, 0.046]} />
+      <meshStandardMaterial color="#efe0c7" roughness={0.75} />
+    </mesh>
+  )
+}
+
+function DeskObjects() {
+  return (
+    <group>
+      <group position={[0.92, 0.69, 0.2]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.1, 0.1, 0.17, 28]} />
+          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
+        </mesh>
+        <mesh position={[0.115, 0.015, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <torusGeometry args={[0.055, 0.011, 8, 24]} />
+          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
+        </mesh>
+      </group>
+      <mesh castShadow position={[-0.95, 0.69, 0.28]}>
+        <cylinderGeometry args={[0.09, 0.11, 0.22, 24]} />
+        <meshStandardMaterial color="#b7c9a5" roughness={0.8} />
+      </mesh>
+      <mesh castShadow position={[-0.95, 0.85, 0.28]}>
+        <sphereGeometry args={[0.12, 16, 12]} />
+        <meshStandardMaterial color="#7ea07a" roughness={0.9} />
+      </mesh>
+      <mesh castShadow position={[0.74, 0.68, -0.35]}>
+        <cylinderGeometry args={[0.12, 0.16, 0.14, 32]} />
+        <meshStandardMaterial color="#cfa45f" metalness={0.15} roughness={0.45} />
+      </mesh>
+      <Text position={[0.72, 0.8, -0.35]} fontSize={0.055} color="#765539" anchorX="center">ding</Text>
+      <mesh castShadow position={[-0.25, 0.69, -0.4]} rotation={[0.06, 0.12, 0]}>
+        <boxGeometry args={[0.42, 0.035, 0.28]} />
+        <meshStandardMaterial color="#ead9bd" roughness={0.92} />
+      </mesh>
+    </group>
+  )
+}
+
+function ScanProduct() {
+  const ref = useRef<THREE.Group>(null)
+
+  useFrame((state) => {
+    if (!ref.current) return
+    ref.current.position.y = 1.06 + Math.sin(state.clock.elapsedTime * 2.2) * 0.04
+    ref.current.rotation.y += 0.015
+  })
+
+  return (
+    <group ref={ref} position={[0.35, 1.06, -0.07]}>
+      <mesh castShadow>
+        <sphereGeometry args={[0.16, 28, 18]} />
+        <meshStandardMaterial color="#9cbad6" roughness={0.55} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.24, 0.008, 8, 64]} />
+        <meshStandardMaterial color="#ffdca4" emissive="#ffc46d" emissiveIntensity={0.8} />
+      </mesh>
+      <Text position={[0.45, 0.18, 0]} fontSize={0.065} color="#7d5d42" anchorX="left">
+        price -14%{'\n'}quality 91{'\n'}save soon
+      </Text>
+    </group>
+  )
+}
+
+function Dragon({
+  isAnalyzing,
+  setView,
+}: {
+  isAnalyzing: boolean
+  setView: (view: CameraView) => void
+}) {
+  const group = useRef<THREE.Group>(null)
+  const head = useRef<THREE.Group>(null)
+  const tail = useRef<THREE.Group>(null)
+  const leftEye = useRef<THREE.Mesh>(null)
+  const rightEye = useRef<THREE.Mesh>(null)
+  const [blink, setBlink] = useState(false)
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setBlink(true)
+      window.setTimeout(() => setBlink(false), 130)
+    }, 3200)
+
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useFrame((state) => {
+    const time = state.clock.elapsedTime
+
+    if (group.current) {
+      group.current.position.y = 0.86 + Math.sin(time * 1.8) * 0.018
+      group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, isAnalyzing ? -0.25 : 0, 0.05)
+    }
+    if (head.current) {
+      head.current.rotation.z = Math.sin(time * 0.7) * 0.045
+      head.current.rotation.x = Math.sin(time * 0.9) * 0.025
+    }
+    if (tail.current) {
+      tail.current.rotation.y = Math.sin(time * 2) * 0.35
+    }
+    const eyeShift = THREE.MathUtils.clamp(state.camera.position.x * 0.016, -0.035, 0.035)
+    if (leftEye.current) leftEye.current.position.x = -0.105 + eyeShift
+    if (rightEye.current) rightEye.current.position.x = 0.105 + eyeShift
+  })
+
+  return (
+    <ClickableGroup onClick={() => setView('dragon')}>
+      <group ref={group} position={[0, 0.86, -0.48]}>
+        <mesh castShadow position={[0, -0.18, 0]}>
+          <sphereGeometry args={[0.28, 32, 20]} />
+          <meshStandardMaterial color="#95bfdd" roughness={0.78} />
+        </mesh>
+        <group ref={head} position={[0, 0.2, 0.02]}>
+          <mesh castShadow scale={[1.22, 0.96, 0.94]}>
+            <sphereGeometry args={[0.34, 40, 24]} />
+            <meshStandardMaterial color="#a9cbe7" roughness={0.72} />
+          </mesh>
+          <mesh castShadow position={[0, -0.05, 0.28]} scale={[0.95, 0.56, 0.38]}>
+            <sphereGeometry args={[0.22, 32, 18]} />
+            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          </mesh>
+          <mesh ref={leftEye} position={[-0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
+            <sphereGeometry args={[0.035, 16, 12]} />
+            <meshStandardMaterial color="#26323a" roughness={0.4} />
+          </mesh>
+          <mesh ref={rightEye} position={[0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
+            <sphereGeometry args={[0.035, 16, 12]} />
+            <meshStandardMaterial color="#26323a" roughness={0.4} />
+          </mesh>
+          <mesh position={[-0.105, 0.055, 0.315]} rotation={[0, 0, 0]}>
+            <torusGeometry args={[0.07, 0.007, 10, 36]} />
+            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          </mesh>
+          <mesh position={[0.105, 0.055, 0.315]}>
+            <torusGeometry args={[0.07, 0.007, 10, 36]} />
+            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          </mesh>
+          <mesh position={[0, 0.055, 0.318]}>
+            <boxGeometry args={[0.07, 0.01, 0.01]} />
+            <meshStandardMaterial color="#5b4b6a" />
+          </mesh>
+          <mesh position={[-0.16, 0.27, 0.03]} rotation={[0, 0, 0.35]}>
+            <coneGeometry args={[0.055, 0.16, 18]} />
+            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          </mesh>
+          <mesh position={[0.16, 0.27, 0.03]} rotation={[0, 0, -0.35]}>
+            <coneGeometry args={[0.055, 0.16, 18]} />
+            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          </mesh>
+        </group>
+        <mesh castShadow position={[-0.31, -0.12, -0.04]} rotation={[0.15, 0.4, 0.7]} scale={[0.08, 0.2, 0.03]}>
+          <sphereGeometry args={[1, 16, 12]} />
+          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
+        </mesh>
+        <mesh castShadow position={[0.31, -0.12, -0.04]} rotation={[0.15, -0.4, -0.7]} scale={[0.08, 0.2, 0.03]}>
+          <sphereGeometry args={[1, 16, 12]} />
+          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
+        </mesh>
+        <group ref={tail} position={[0, -0.2, -0.28]}>
+          <mesh castShadow rotation={[1.1, 0, 0]} scale={[0.07, 0.07, 0.36]}>
+            <sphereGeometry args={[1, 16, 12]} />
+            <meshStandardMaterial color="#8fb8d8" roughness={0.8} />
+          </mesh>
+        </group>
+      </group>
+    </ClickableGroup>
+  )
+}
+
+function ArchiveShelves({
+  products,
+  selectedProductId,
+  setSelectedProductId,
+  setView,
+}: {
+  products: Product[]
+  selectedProductId: string | null
+  setSelectedProductId: (id: string | null) => void
+  setView: (view: CameraView) => void
+}) {
+  const selectedProduct = products.find((product) => product.id === selectedProductId)
+
+  return (
+    <group position={[0, 0, 0]}>
+      <ClickableGroup onClick={() => setView('waiting')}>
+        <ShelfSection label="Waiting for a Sale" labelIcon="hourglass" position={[-1.9, 1.43, -2.72]} color="#aebed0" />
+      </ClickableGroup>
+      <ClickableGroup onClick={() => setView('worth')}>
+        <ShelfSection label="Worth It" labelIcon="flower" position={[1.9, 1.43, -2.72]} color="#c7d3aa" />
+      </ClickableGroup>
+      <ShelfSection label="Purchased" labelIcon="star" position={[-0.65, 0.34, -2.72]} color="#e1b391" />
+      <ShelfSection label="Recently Added" labelIcon="box" position={[0.65, 0.34, -2.72]} color="#cdb6d9" />
+
+      {products.map((product) => (
+        <ProductCard
+          key={product.id}
+          product={product}
+          selected={product.id === selectedProductId}
+          onSelect={() => {
+            setSelectedProductId(product.id)
+            setView('product')
+          }}
+        />
+      ))}
+      {selectedProduct && <ProductInfoPanel product={selectedProduct} />}
+    </group>
+  )
+}
+
+function ShelfSection({
+  color,
+  label,
+  labelIcon,
+  position,
+}: {
+  color: string
+  label: string
+  labelIcon: string
+  position: [number, number, number]
+}) {
+  return (
+    <group position={position}>
+      <RoundedBox castShadow receiveShadow args={[1.82, 1.1, 0.32]} radius={0.045} smoothness={6}>
+        <meshStandardMaterial color="#c89d69" roughness={0.76} />
+      </RoundedBox>
+      <mesh position={[0, 0, 0.18]}>
+        <boxGeometry args={[1.62, 0.86, 0.04]} />
+        <meshStandardMaterial color="#f5e4ca" emissive="#f2c98f" emissiveIntensity={0.1} roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0.51, 0.22]}>
+        <boxGeometry args={[1.1, 0.18, 0.035]} />
+        <meshStandardMaterial color={color} roughness={0.86} />
+      </mesh>
+      <Text position={[0, 0.515, 0.245]} fontSize={0.052} color="#5f4b38" anchorX="center">
+        {labelIcon} {label}
+      </Text>
+      <mesh position={[-0.46, 0.02, 0.22]}>
+        <boxGeometry args={[0.03, 0.74, 0.035]} />
+        <meshStandardMaterial color="#d8b27a" roughness={0.74} />
+      </mesh>
+      <mesh position={[0.46, 0.02, 0.22]}>
+        <boxGeometry args={[0.03, 0.74, 0.035]} />
+        <meshStandardMaterial color="#d8b27a" roughness={0.74} />
+      </mesh>
+    </group>
+  )
+}
+
+function ProductCard({
+  onSelect,
+  product,
+  selected,
+}: {
+  onSelect: () => void
+  product: Product
+  selected: boolean
+}) {
+  const [hovered, setHovered] = useState(false)
+  const group = useRef<THREE.Group>(null)
+  const texture = useProductTexture(product)
+
+  useCursor(hovered)
+
+  useFrame((state) => {
+    if (!group.current) return
+    const time = state.clock.elapsedTime
+    const targetScale = selected ? 1.22 : hovered ? 1.1 : 1
+
+    group.current.position.y = product.position[1] + Math.sin(time * 1.4 + product.position[0]) * 0.025 + (selected ? 0.18 : 0)
+    group.current.position.z = product.position[2] + (selected ? 0.25 : 0)
+    group.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.12)
+  })
+
+  return (
+    <Float speed={1.4} floatIntensity={0.04} rotationIntensity={0.03}>
+      <group
+        ref={group}
+        position={product.position}
+        onClick={(event) => {
+          event.stopPropagation()
+          onSelect()
+        }}
+        onPointerOut={() => setHovered(false)}
+        onPointerOver={(event) => {
+          event.stopPropagation()
+          setHovered(true)
+        }}
+      >
+        <mesh castShadow>
+          <boxGeometry args={[0.54, 0.72, 0.035]} />
+          <meshStandardMaterial
+            color="#fff7e7"
+            emissive={selected || hovered ? '#ffdba8' : '#6b4b2f'}
+            emissiveIntensity={selected ? 0.32 : hovered ? 0.18 : 0.03}
+            map={texture}
+            roughness={0.82}
+          />
+        </mesh>
+        <mesh position={[0, -0.45, 0.04]}>
+          <boxGeometry args={[0.64, 0.08, 0.09]} />
+          <meshStandardMaterial color="#b7895a" roughness={0.8} />
+        </mesh>
+        <Text position={[0, -0.325, 0.055]} fontSize={0.042} color="#76553e" maxWidth={0.45} textAlign="center" anchorX="center">
+          {product.price} - {product.badge}
+        </Text>
+        {(selected || product.isNew) && <Sparkles count={18} scale={[0.75, 0.85, 0.35]} size={2} speed={0.35} color="#ffe1a3" />}
+      </group>
+    </Float>
+  )
+}
+
+function ProductInfoPanel({ product }: { product: Product }) {
+  const side = product.position[0] > 1.5 ? -1 : 1
+
+  return (
+    <Float speed={1.2} floatIntensity={0.025} rotationIntensity={0.015}>
+      <group position={[product.position[0] + side * 0.86, product.position[1] + 0.02, product.position[2] + 0.12]}>
+        <RoundedBox castShadow args={[0.96, 1.08, 0.035]} radius={0.045} smoothness={6}>
+          <meshStandardMaterial color="#fff2d7" roughness={0.9} />
+        </RoundedBox>
+        <Text position={[0, 0.42, 0.035]} fontSize={0.064} color="#5b4434" maxWidth={0.78} textAlign="center" anchorX="center">
+          {product.name}
+        </Text>
+        <Text position={[-0.38, 0.23, 0.035]} fontSize={0.044} color="#75614f" anchorX="left">
+          Current: {product.price}{'\n'}
+          Lowest: {product.lowest}{'\n'}
+          Quality: {product.rating}{'\n'}
+          Verdict: {product.verdict}{'\n'}
+          Sale: {product.saleDate}
+        </Text>
+        <TrendGraph values={product.graph} />
+      </group>
+    </Float>
+  )
+}
+
+function TrendGraph({ values }: { values: number[] }) {
+  return (
+    <group position={[-0.3, -0.36, 0.045]}>
+      {values.map((value, index) => (
+        <mesh key={`${value}-${index}`} position={[index * 0.14, value * 0.22, 0]}>
+          <boxGeometry args={[0.055, value * 0.42, 0.025]} />
+          <meshStandardMaterial color={index === values.length - 1 ? '#8aa881' : '#bca0c9'} roughness={0.75} />
+        </mesh>
+      ))}
+      <Text position={[0.28, -0.07, 0.02]} fontSize={0.035} color="#80644b" anchorX="center">
+        price trend
+      </Text>
+    </group>
+  )
+}
+
+function useProductTexture(product: Product) {
+  return useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 384
+    canvas.height = 512
+    const context = canvas.getContext('2d')
+
+    if (context) {
+      const gradient = context.createLinearGradient(0, 0, 384, 512)
+      gradient.addColorStop(0, product.colorA)
+      gradient.addColorStop(1, product.colorB)
+      context.fillStyle = '#fff8eb'
+      context.fillRect(0, 0, 384, 512)
+      context.fillStyle = gradient
+      context.roundRect(34, 34, 316, 300, 28)
+      context.fill()
+      context.fillStyle = 'rgba(255,255,255,0.64)'
+      context.beginPath()
+      context.arc(190, 160, 76, 0, Math.PI * 2)
+      context.fill()
+      context.strokeStyle = '#8b6a4d'
+      context.lineWidth = 8
+      context.strokeRect(34, 34, 316, 300)
+      context.fillStyle = '#5e4938'
+      context.font = 'bold 34px serif'
+      context.textAlign = 'center'
+      context.fillText(product.name, 192, 390, 310)
+      context.font = '28px serif'
+      context.fillText(product.price, 192, 438)
+    }
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.anisotropy = 4
+    return texture
+  }, [product])
+}
+
+function Decorations() {
+  return (
+    <group>
+      <GltfTag position={[-3.1, 1.16, -2.74]} rotation={[0, 0, -0.08]} />
+      <Plants />
+      <BooksAndBaskets />
+      <FairyLights />
+      <WallArt />
+      <DeskLamp />
+      <PlushAndCollectibles />
+    </group>
+  )
+}
+
+function GltfTag({
+  position,
+  rotation,
+}: {
+  position: [number, number, number]
+  rotation: [number, number, number]
+}) {
+  const { scene } = useGLTF('/models/handwritten-tag.gltf')
+  const clone = useMemo(() => scene.clone(true), [scene])
+
+  return (
+    <group position={position} rotation={rotation}>
+      <primitive object={clone} scale={[0.34, 0.34, 0.34]} />
+      <RoundedBox castShadow args={[0.76, 0.24, 0.035]} radius={0.035} smoothness={5}>
+        <meshStandardMaterial color="#ead5ae" roughness={0.92} />
+      </RoundedBox>
+      <Text position={[0, 0, 0.028]} fontSize={0.052} color="#72543c" anchorX="center">
+        handwritten picks
+      </Text>
+    </group>
+  )
+}
+
+function Plants() {
+  return (
+    <group>
+      {[
+        [-3.7, 0.12, -2.55],
+        [3.55, 0.12, -2.35],
+        [-3.85, 1.95, -1.35],
+      ].map(([x, y, z], index) => (
+        <group key={`${x}-${z}`} position={[x, y, z]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.14, 0.18, 0.22, 18]} />
+            <meshStandardMaterial color={index === 1 ? '#d8b2a4' : '#c6b285'} roughness={0.85} />
+          </mesh>
+          {Array.from({ length: 7 }, (_, leafIndex) => (
+            <mesh
+              key={leafIndex}
+              castShadow
+              position={[
+                Math.cos(leafIndex) * 0.09,
+                0.18 + leafIndex * 0.012,
+                Math.sin(leafIndex * 1.7) * 0.08,
+              ]}
+              rotation={[0.5, leafIndex, 0.6]}
+              scale={[0.06, 0.18, 0.025]}
+            >
+              <sphereGeometry args={[1, 12, 8]} />
+              <meshStandardMaterial color="#78966f" roughness={0.9} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function BooksAndBaskets() {
+  return (
+    <group>
+      {Array.from({ length: 9 }, (_, index) => (
+        <mesh key={index} castShadow position={[-3.3 + index * 0.095, 0.73, -2.52]} rotation={[0, 0, (index % 3 - 1) * 0.08]}>
+          <boxGeometry args={[0.07, 0.34 + (index % 4) * 0.025, 0.22]} />
+          <meshStandardMaterial color={['#9db1bd', '#d8aa8a', '#b9c99a'][index % 3]} roughness={0.82} />
+        </mesh>
+      ))}
+      {[-2.9, 2.9].map((x) => (
+        <group key={x} position={[x, 0.18, 0.02]}>
+          <RoundedBox castShadow args={[0.62, 0.3, 0.42]} radius={0.06} smoothness={6}>
+            <meshStandardMaterial color="#b98958" roughness={0.96} wireframe={false} />
+          </RoundedBox>
+          <mesh position={[0, 0.08, 0.23]}>
+            <boxGeometry args={[0.58, 0.035, 0.025]} />
+            <meshStandardMaterial color="#e4c393" roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function FairyLights() {
+  return (
+    <group position={[0, 3.15, -2.88]}>
+      {Array.from({ length: 18 }, (_, index) => {
+        const x = -3.4 + index * 0.4
+        const y = Math.sin(index * 0.8) * 0.09
+
+        return (
+          <group key={index} position={[x, y, 0]}>
+            <mesh>
+              <sphereGeometry args={[0.035, 12, 8]} />
+              <meshStandardMaterial color="#ffe4aa" emissive="#ffc86f" emissiveIntensity={0.75 + Math.sin(index) * 0.15} />
+            </mesh>
+            <pointLight color="#ffd99f" intensity={0.18} distance={0.9} />
+          </group>
+        )
+      })}
+      <mesh position={[0, 0.05, 0]}>
+        <boxGeometry args={[7, 0.015, 0.015]} />
+        <meshStandardMaterial color="#87694c" roughness={0.9} />
+      </mesh>
+    </group>
+  )
+}
+
+function WallArt() {
+  const frames: Array<[number, number, number, string]> = [
+    [-3.85, 2.35, -0.8, '#c7b1d7'],
+    [3.85, 2.05, -0.95, '#a8c4ad'],
+  ]
+
+  return (
+    <group>
+      {frames.map(([x, y, z, color]) => (
+        <group key={`${x}-${z}`} position={[x, y, z]} rotation={[0, x < 0 ? Math.PI / 2 : -Math.PI / 2, 0]}>
+          <mesh castShadow>
+            <boxGeometry args={[0.72, 0.5, 0.045]} />
+            <meshStandardMaterial color="#a77a52" roughness={0.68} />
+          </mesh>
+          <mesh position={[0, 0, 0.03]}>
+            <boxGeometry args={[0.58, 0.36, 0.035]} />
+            <meshStandardMaterial color={color} roughness={0.82} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function DeskLamp() {
+  return (
+    <group position={[1.12, 0.9, 0.65]}>
+      <mesh castShadow position={[0, -0.22, 0]}>
+        <cylinderGeometry args={[0.15, 0.15, 0.035, 32]} />
+        <meshStandardMaterial color="#b9824d" metalness={0.2} roughness={0.42} />
+      </mesh>
+      <mesh castShadow position={[0, 0.02, 0]} rotation={[0, 0, -0.45]}>
+        <cylinderGeometry args={[0.025, 0.025, 0.48, 16]} />
+        <meshStandardMaterial color="#b9824d" metalness={0.18} roughness={0.45} />
+      </mesh>
+      <mesh castShadow position={[0.18, 0.28, 0]} rotation={[0, 0, -0.32]}>
+        <coneGeometry args={[0.18, 0.22, 28]} />
+        <meshStandardMaterial color="#f1d8a8" emissive="#ffcd7f" emissiveIntensity={0.28} roughness={0.65} />
+      </mesh>
+      <pointLight color="#ffc878" intensity={1.1} distance={2} position={[0.18, 0.18, 0.08]} />
+    </group>
+  )
+}
+
+function PlushAndCollectibles() {
+  return (
+    <group position={[3.28, 0.66, -2.45]}>
+      <mesh castShadow scale={[0.14, 0.19, 0.12]}>
+        <sphereGeometry args={[1, 18, 12]} />
+        <meshStandardMaterial color="#d78d68" roughness={0.9} />
+      </mesh>
+      <mesh castShadow position={[-0.08, 0.16, 0]} rotation={[0, 0, 0.45]}>
+        <coneGeometry args={[0.055, 0.13, 16]} />
+        <meshStandardMaterial color="#d78d68" roughness={0.9} />
+      </mesh>
+      <mesh castShadow position={[0.08, 0.16, 0]} rotation={[0, 0, -0.45]}>
+        <coneGeometry args={[0.055, 0.13, 16]} />
+        <meshStandardMaterial color="#d78d68" roughness={0.9} />
+      </mesh>
+      <mesh position={[-0.04, 0.03, 0.1]}>
+        <sphereGeometry args={[0.018, 10, 8]} />
+        <meshStandardMaterial color="#493b32" />
+      </mesh>
+      <mesh position={[0.04, 0.03, 0.1]}>
+        <sphereGeometry args={[0.018, 10, 8]} />
+        <meshStandardMaterial color="#493b32" />
+      </mesh>
+    </group>
+  )
+}
+
+function FloatingDust() {
+  return <Sparkles count={70} scale={[7, 3, 5]} size={1.25} speed={0.16} color="#ffe4b7" position={[0, 1.7, 0]} />
+}
+
+function ClickableGroup({
+  children,
+  onClick,
+}: {
+  children: ReactNode
+  onClick: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  useCursor(hovered)
+
+  return (
+    <group
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      onPointerOut={() => setHovered(false)}
+      onPointerOver={(event) => {
+        event.stopPropagation()
+        setHovered(true)
+      }}
+    >
+      {children}
+    </group>
+  )
+}
+
+useGLTF.preload('/models/handwritten-tag.gltf')
 
 export default App
