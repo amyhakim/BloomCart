@@ -59,6 +59,7 @@ type DatabaseProduct = {
   source_url: string | null;
   cart_url: string | null;
   name: string;
+  prices: number[] | null;
   price: number | null;
   currency: string | null;
   quantity: number | null;
@@ -66,6 +67,11 @@ type DatabaseProduct = {
   captured_at: string | null;
   last_seen_at: string | null;
   lowest_price: number | null;
+  previous_price?: number | null;
+  last_checked_at?: string | null;
+  price_changed_at?: string | null;
+  check_error?: string | null;
+  price_check_method?: string | null;
   rating: string | null;
   verdict: string | null;
   badge: string | null;
@@ -194,7 +200,13 @@ async function getDatabaseProducts() {
 }
 
 function formatProductPrice(product: DatabaseProduct) {
-  if (product.price === null) {
+  const resolvedPrice =
+    product.price ??
+    (product.prices && product.prices.length
+      ? product.prices[product.prices.length - 1]
+      : null);
+
+  if (resolvedPrice === null) {
     return "Unknown";
   }
 
@@ -204,7 +216,7 @@ function formatProductPrice(product: DatabaseProduct) {
       : product.currency
         ? `${product.currency} `
         : "";
-  return `${currencyPrefix}${product.price.toFixed(2)}`;
+  return `${currencyPrefix}${resolvedPrice.toFixed(2)}`;
 }
 
 function formatCapturedDate(value: string | null) {
@@ -236,10 +248,13 @@ function databaseProductsToProducts(
 ): Product[] {
   return databaseProducts.slice(0, MAX_RENDERED_PRODUCTS).map((item, index) => {
     const price = formatProductPrice(item);
+    const lowestNumericPrice =
+      item.lowest_price ??
+      (item.prices && item.prices.length ? Math.min(...item.prices) : null);
     const lowest =
-      item.lowest_price === null
+      lowestNumericPrice === null
         ? price
-        : formatProductPrice({ ...item, price: item.lowest_price });
+        : formatProductPrice({ ...item, price: lowestNumericPrice });
     const hash = getStableHash(
       `${item.source_site}|${item.id}|${item.source_product_id ?? ""}`,
     );

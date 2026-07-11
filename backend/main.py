@@ -213,15 +213,31 @@ def stable_product_id(site: str, product: CapturedProduct) -> str:
     return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24]
 
 
+def normalize_prices(prices: list[Decimal] | None) -> list[Decimal]:
+    return [price for price in prices or [] if price is not None]
+
+
+def latest_price(prices: list[Decimal] | None) -> Decimal | None:
+    normalized = normalize_prices(prices)
+    return normalized[-1] if normalized else None
+
+
+def lowest_price(prices: list[Decimal] | None) -> Decimal | None:
+    normalized = normalize_prices(prices)
+    return min(normalized) if normalized else None
+
+
 def serialize_product(row: dict[str, Any]) -> dict[str, Any]:
-    price = row["price"]
-    lowest_price = row["lowest_price"]
+    prices = normalize_prices(row.get("prices"))
+    price = latest_price(prices)
+    lowest = lowest_price(prices)
     previous_price = row.get("previous_price")
 
     return {
         **row,
+        "prices": [float(item) for item in prices],
         "price": float(price) if price is not None else None,
-        "lowest_price": float(lowest_price) if lowest_price is not None else None,
+        "lowest_price": float(lowest) if lowest is not None else None,
         "previous_price": float(previous_price) if previous_price is not None else None,
         "captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
         "last_seen_at": row["last_seen_at"].isoformat() if row["last_seen_at"] else None,
@@ -244,14 +260,13 @@ def startup():
               source_product_id TEXT,
               source_url TEXT,
               cart_url TEXT,
+              prices NUMERIC(12, 2)[],
               name TEXT NOT NULL,
-              price NUMERIC(12, 2),
               currency TEXT,
               quantity INTEGER DEFAULT 1,
               image_url TEXT,
               captured_at TIMESTAMPTZ NOT NULL,
               last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-              lowest_price NUMERIC(12, 2),
               rating TEXT,
               verdict TEXT,
               badge TEXT,
@@ -270,6 +285,7 @@ def startup():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC)")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS prices NUMERIC(12, 2)[]")
         conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS previous_price NUMERIC(12, 2)")
         conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ")
         conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS price_changed_at TIMESTAMPTZ")
@@ -305,14 +321,13 @@ def capture_products(capture: CartCapture):
                     source_product_id,
                     source_url,
                     cart_url,
+                    prices,
                     name,
-                    price,
                     currency,
                     quantity,
                     image_url,
                     captured_at,
                     last_seen_at,
-                    lowest_price,
                     rating,
                     verdict,
                     badge,
@@ -324,14 +339,13 @@ def capture_products(capture: CartCapture):
                     %(source_product_id)s,
                     %(source_url)s,
                     %(cart_url)s,
+                    %(prices)s,
                     %(name)s,
-                    %(price)s,
                     %(currency)s,
                     %(quantity)s,
                     %(image_url)s,
                     %(captured_at)s,
                     now(),
-                    %(lowest_price)s,
                     %(rating)s,
                     %(verdict)s,
                     %(badge)s,
@@ -344,13 +358,29 @@ def capture_products(capture: CartCapture):
                     source_url = EXCLUDED.source_url,
                     cart_url = EXCLUDED.cart_url,
                     name = EXCLUDED.name,
-                    price = EXCLUDED.price,
+                    prices = CASE
+                        WHEN array_length(EXCLUDED.prices, 1) IS NULL THEN COALESCE(products.prices, ARRAY[]::NUMERIC(12, 2)[])
+                        WHEN COALESCE(array_length(products.prices, 1), 0) = 0 THEN EXCLUDED.prices
+                        WHEN products.prices[array_length(products.prices, 1)] IS DISTINCT FROM EXCLUDED.prices[1] THEN array_append(products.prices, EXCLUDED.prices[1])
+                        ELSE products.prices
+                    END,
                     currency = EXCLUDED.currency,
                     quantity = EXCLUDED.quantity,
                     image_url = COALESCE(EXCLUDED.image_url, products.image_url),
                     captured_at = EXCLUDED.captured_at,
                     last_seen_at = now(),
-                    lowest_price = LEAST(COALESCE(products.lowest_price, EXCLUDED.price), COALESCE(EXCLUDED.price, products.lowest_price)),
+                    previous_price = CASE
+                        WHEN array_length(EXCLUDED.prices, 1) IS NULL THEN products.previous_price
+                        WHEN COALESCE(array_length(products.prices, 1), 0) = 0 THEN products.previous_price
+                        WHEN products.prices[array_length(products.prices, 1)] IS DISTINCT FROM EXCLUDED.prices[1] THEN products.prices[array_length(products.prices, 1)]
+                        ELSE products.previous_price
+                    END,
+                    price_changed_at = CASE
+                        WHEN array_length(EXCLUDED.prices, 1) IS NULL THEN products.price_changed_at
+                        WHEN COALESCE(array_length(products.prices, 1), 0) = 0 THEN products.price_changed_at
+                        WHEN products.prices[array_length(products.prices, 1)] IS DISTINCT FROM EXCLUDED.prices[1] THEN now()
+                        ELSE products.price_changed_at
+                    END,
                     badge = EXCLUDED.badge,
                     raw_product = EXCLUDED.raw_product,
                     updated_at = now()
@@ -360,13 +390,12 @@ def capture_products(capture: CartCapture):
                     "source_product_id": source_product_id,
                     "source_url": product.link,
                     "cart_url": capture.sourceUrl,
+                    "prices": [price] if price is not None else [],
                     "name": product.name,
-                    "price": price,
                     "currency": currency,
                     "quantity": quantity,
                     "image_url": image_url,
                     "captured_at": captured_at,
-                    "lowest_price": price,
                     "rating": "Analyzing",
                     "verdict": "Recently captured",
                     "badge": f"Qty {quantity}" if quantity > 1 else "New",
@@ -392,8 +421,8 @@ def list_products(limit: int = MAX_PRODUCTS):
               source_product_id,
               source_url,
               cart_url,
+              prices,
               name,
-              price,
               currency,
               quantity,
               image_url,
@@ -404,7 +433,6 @@ def list_products(limit: int = MAX_PRODUCTS):
               price_changed_at,
               check_error,
               price_check_method,
-              lowest_price,
               rating,
               verdict,
               badge,
@@ -435,8 +463,8 @@ def get_product(product_id: str):
               source_product_id,
               source_url,
               cart_url,
+              prices,
               name,
-              price,
               currency,
               quantity,
               image_url,
@@ -447,7 +475,6 @@ def get_product(product_id: str):
               price_changed_at,
               check_error,
               price_check_method,
-              lowest_price,
               rating,
               verdict,
               badge,
@@ -477,7 +504,7 @@ def save_price_check_result(product_id: str, result: PriceCheckResult):
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id::text, name, price, currency
+            SELECT id::text, name, prices, currency
             FROM products
             WHERE id = %s
             """,
@@ -487,7 +514,8 @@ def save_price_check_result(product_id: str, result: PriceCheckResult):
         if not row:
             raise HTTPException(status_code=404, detail="Product not found")
 
-        old_price = row[2]
+        existing_prices = normalize_prices(row[2])
+        old_price = latest_price(existing_prices)
         old_currency = row[3]
         price_changed = checked_price is not None and old_price is not None and checked_price != old_price
         price_dropped = price_changed and checked_price < old_price
@@ -497,19 +525,20 @@ def save_price_check_result(product_id: str, result: PriceCheckResult):
             UPDATE products
             SET
               previous_price = CASE
-                WHEN %(checked_price)s IS NOT NULL AND price IS DISTINCT FROM %(checked_price)s THEN price
+                WHEN %(checked_price)s IS NOT NULL AND COALESCE(array_length(prices, 1), 0) > 0 AND prices[array_length(prices, 1)] IS DISTINCT FROM %(checked_price)s THEN prices[array_length(prices, 1)]
                 ELSE previous_price
               END,
-              price = COALESCE(%(checked_price)s, price),
-              currency = COALESCE(%(checked_currency)s, currency),
-              lowest_price = CASE
-                WHEN %(checked_price)s IS NULL THEN lowest_price
-                WHEN lowest_price IS NULL THEN %(checked_price)s
-                ELSE LEAST(lowest_price, %(checked_price)s)
+              prices = CASE
+                WHEN %(checked_price)s IS NULL THEN COALESCE(prices, ARRAY[]::NUMERIC(12, 2)[])
+                WHEN COALESCE(array_length(prices, 1), 0) = 0 THEN ARRAY[%(checked_price)s]::NUMERIC(12, 2)[]
+                WHEN prices[array_length(prices, 1)] IS DISTINCT FROM %(checked_price)s THEN array_append(prices, %(checked_price)s)
+                ELSE prices
               END,
+              currency = COALESCE(%(checked_currency)s, currency),
               last_checked_at = now(),
               price_changed_at = CASE
-                WHEN %(checked_price)s IS NOT NULL AND price IS DISTINCT FROM %(checked_price)s THEN now()
+                WHEN %(checked_price)s IS NOT NULL AND COALESCE(array_length(prices, 1), 0) > 0 AND prices[array_length(prices, 1)] IS DISTINCT FROM %(checked_price)s THEN now()
+                WHEN %(checked_price)s IS NOT NULL AND COALESCE(array_length(prices, 1), 0) = 0 THEN now()
                 ELSE price_changed_at
               END,
               check_error = %(check_error)s,
@@ -547,7 +576,7 @@ def check_product_price(product_id: str):
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT id::text, name, source_site, source_url, price, currency
+            SELECT id::text, name, source_site, source_url, prices, currency
             FROM products
             WHERE id = %s
             """,
@@ -557,12 +586,14 @@ def check_product_price(product_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    stored_price = latest_price(row[4])
+
     product = {
         "id": row[0],
         "name": row[1],
         "source_site": row[2],
-        "source_url": "https://www.amazon.com/Black-Retractable-Rollerball-Smooth-Writing/dp/B08G1FSHYZ?pd_rd_w=07xXc&content-id=amzn1.sym.4ce6c22d-fc22-4c3e-8a0c-88c5faf77c35&pf_rd_p=4ce6c22d-fc22-4c3e-8a0c-88c5faf77c35&pf_rd_r=PKV2TYXGAS778Y1AP3KV&pd_rd_wg=oAbKo&pd_rd_r=1a5d1582-fe90-4312-8e52-c81ec212da2f&pd_rd_i=B08G1FSHYZ&psc=1",
-        "stored_price": float(row[4]) if row[4] is not None else None,
+        "source_url": row[3],
+        "stored_price": float(stored_price) if stored_price is not None else None,
         "stored_currency": row[5],
     }
 
