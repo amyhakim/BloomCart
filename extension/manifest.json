@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "BloomCart Cart Reader",
+  "version": "0.1.0",
+  "description": "Reads cart pages and extracts product information for BloomCart.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "Read Cart"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
