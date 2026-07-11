@@ -653,7 +653,6 @@ function Scene({
       <Room />
       <WallShelves setView={setView} />
       <CardWall products={products} onOpen={onOpen} />
-      <IslandCounter isAnalyzing={isAnalyzing} setView={setView} />
       <Dragon isAnalyzing={isAnalyzing} setView={setView} />
       <Cat position={[0.95, 0.66, -1.05]} />
       <Dog position={[-1.4, 0.0, -0.35]} />
@@ -996,109 +995,6 @@ function CardWall({
           </group>
         );
       })}
-    </group>
-  );
-}
-
-/* ---------------------------- island counter ---------------------------- */
-
-function IslandCounter({
-  isAnalyzing,
-  setView,
-}: {
-  isAnalyzing: boolean;
-  setView: (v: CameraView) => void;
-}) {
-  return (
-    <ClickableGroup onClick={() => setView("register")}>
-      <group position={[0, 0, -1.15]}>
-        {/* counter body */}
-        <mesh castShadow receiveShadow position={[0, 0.32, 0]}>
-          <boxGeometry args={[2.1, 0.64, 1.0]} />
-          <meshStandardMaterial color="#a98fd0" roughness={0.8} flatShading />
-        </mesh>
-        {/* counter top */}
-        <mesh castShadow position={[0, 0.67, 0]}>
-          <boxGeometry args={[2.26, 0.1, 1.14]} />
-          <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
-        </mesh>
-        {/* retro monitor */}
-        <group position={[0.62, 0.85, 0.05]} rotation={[0, -0.3, 0]}>
-          <mesh castShadow>
-            <boxGeometry args={[0.5, 0.42, 0.36]} />
-            <meshStandardMaterial color="#e9dcc4" roughness={0.7} flatShading />
-          </mesh>
-          <mesh position={[0, 0.02, 0.19]}>
-            <boxGeometry args={[0.38, 0.28, 0.02]} />
-            <meshStandardMaterial
-              color="#20301f"
-              emissive="#1c2b1b"
-              emissiveIntensity={0.5}
-              flatShading
-            />
-          </mesh>
-          <Html
-            position={[0, 0.02, 0.21]}
-            center
-            distanceFactor={2.2}
-            zIndexRange={[10, 0]}
-          >
-            <div className="bc-crt">
-              <div>QUALITY {isAnalyzing ? "████" : "██▚▚"}</div>
-              <div>PRICE&nbsp;&nbsp; {isAnalyzing ? "███▚" : "██▚▚"}</div>
-              <div>HYPE&nbsp;&nbsp;&nbsp; {isAnalyzing ? "██▚▚" : "█▚▚▚"}</div>
-              <div className="bc-crt-grade">{isAnalyzing ? "B+" : "A"}</div>
-            </div>
-          </Html>
-        </group>
-        {/* scanner */}
-        <Scanner isAnalyzing={isAnalyzing} />
-        {/* mug */}
-        <group position={[-0.05, 0.78, 0.32]}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.08, 0.07, 0.14, 6]} />
-            <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
-          </mesh>
-        </group>
-      </group>
-    </ClickableGroup>
-  );
-}
-
-function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
-  const ring = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    if (!ring.current) return;
-    ring.current.rotation.z = s.clock.elapsedTime * 2;
-    ring.current.scale.setScalar(
-      1 + Math.sin(s.clock.elapsedTime * 4) * (isAnalyzing ? 0.12 : 0.03),
-    );
-  });
-  return (
-    <group position={[-0.6, 0.74, 0.05]}>
-      <mesh castShadow>
-        <boxGeometry args={[0.42, 0.1, 0.34]} />
-        <meshStandardMaterial color="#9c7c52" roughness={0.8} flatShading />
-      </mesh>
-      <mesh ref={ring} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.15, 0.012, 6, 18]} />
-        <meshStandardMaterial
-          color={isAnalyzing ? "#ffd591" : "#e8c79d"}
-          emissive={isAnalyzing ? "#ffc46d" : "#7a4f30"}
-          emissiveIntensity={isAnalyzing ? 1 : 0.15}
-          flatShading
-        />
-      </mesh>
-      {isAnalyzing && (
-        <Sparkles
-          count={20}
-          scale={[0.5, 0.5, 0.5]}
-          size={2}
-          speed={0.5}
-          color="#ffe4a8"
-          position={[0, 0.3, 0]}
-        />
-      )}
     </group>
   );
 }
