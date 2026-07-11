@@ -12,6 +12,7 @@ import gsap from 'gsap'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as THREE from 'three'
+import CrosshairCursor from './components/CrosshairCursor'
 import './App.css'
 
 type CameraView = 'default' | 'register' | 'waiting' | 'worth' | 'dragon' | 'product'
@@ -230,6 +231,7 @@ function App() {
           </Suspense>
         </Canvas>
       </div>
+      <CrosshairCursor />
 
       <nav className="top-controls" aria-label="BloomCart controls">
         <button type="button" onClick={handleUpload}>Upload Cart</button>
@@ -303,6 +305,11 @@ function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null;
   const basePosition = useRef(new THREE.Vector3(0, 2.35, 7))
   const baseLookAt = useRef(new THREE.Vector3(0, 1.2, -0.6))
   const lookAt = useRef(new THREE.Vector3(0, 1.2, -0.6))
+  const smoothMouse = useRef(new THREE.Vector2())
+  const desiredPosition = useRef(new THREE.Vector3())
+  const desiredLookAt = useRef(new THREE.Vector3())
+  const parallaxOffset = useRef(new THREE.Vector3())
+  const lookOffset = useRef(new THREE.Vector3())
 
   useEffect(() => {
     const target =
@@ -334,15 +341,17 @@ function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null;
   }, [camera, selectedProduct, view])
 
   useFrame((_, delta) => {
-    const glide = 1 - Math.pow(0.0001, delta)
-    const parallax = new THREE.Vector3(mouse.x * 0.14, mouse.y * 0.08, 0)
-    const desired = basePosition.current.clone().add(parallax)
+    const mouseBlend = 1 - Math.exp(-10 * delta)
+    const cameraBlend = 1 - Math.exp(-7.5 * delta)
 
-    camera.position.lerp(desired, glide)
-    lookAt.current.lerp(
-      baseLookAt.current.clone().add(new THREE.Vector3(mouse.x * 0.08, mouse.y * 0.04, 0)),
-      glide,
-    )
+    smoothMouse.current.lerp(mouse, mouseBlend)
+    parallaxOffset.current.set(smoothMouse.current.x * 0.16, smoothMouse.current.y * 0.1, 0)
+    lookOffset.current.set(smoothMouse.current.x * 0.1, smoothMouse.current.y * 0.055, 0)
+    desiredPosition.current.copy(basePosition.current).add(parallaxOffset.current)
+    desiredLookAt.current.copy(baseLookAt.current).add(lookOffset.current)
+
+    camera.position.lerp(desiredPosition.current, cameraBlend)
+    lookAt.current.lerp(desiredLookAt.current, cameraBlend)
     camera.lookAt(lookAt.current)
   })
 
