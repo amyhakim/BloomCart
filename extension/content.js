@@ -1,4 +1,7 @@
 (function readBloomCartPage() {
+  const CAPTURE_MESSAGE_TYPE = "BLOOMCART_CART_CAPTURED";
+  const CAPTURE_DEBOUNCE_MS = 1000;
+
   const supportedSites = [
     {
       name: "Amazon",
@@ -149,6 +152,25 @@
     });
   }
 
+  function buildCartJson(site) {
+    const products = dedupeProducts(collectCandidates(site).map(extractProduct).filter(Boolean));
+
+    return {
+      supportedSite: site.name,
+      sourceUrl: window.location.href,
+      extractedAt: new Date().toISOString(),
+      productCount: products.length,
+      products
+    };
+  }
+
+  function sendCapture(cartJson) {
+    chrome.runtime.sendMessage({
+      type: CAPTURE_MESSAGE_TYPE,
+      payload: cartJson
+    });
+  }
+
   const site = getSupportedSite();
 
   if (!site) {
@@ -156,14 +178,37 @@
     return;
   }
 
-  const products = dedupeProducts(collectCandidates(site).map(extractProduct).filter(Boolean));
-  const cartJson = {
-    supportedSite: site.name,
-    sourceUrl: window.location.href,
-    extractedAt: new Date().toISOString(),
-    productCount: products.length,
-    products
-  };
+  let lastCaptureSignature = "";
+  let captureTimeout = null;
 
-  console.log("BloomCart extracted cart JSON:", cartJson);
+  function captureCart() {
+    const cartJson = buildCartJson(site);
+    const signature = JSON.stringify({
+      sourceUrl: cartJson.sourceUrl,
+      products: cartJson.products
+    });
+
+    if (signature === lastCaptureSignature) {
+      return;
+    }
+
+    lastCaptureSignature = signature;
+    sendCapture(cartJson);
+    console.log("BloomCart extracted cart JSON:", cartJson);
+  }
+
+  function scheduleCapture() {
+    window.clearTimeout(captureTimeout);
+    captureTimeout = window.setTimeout(captureCart, CAPTURE_DEBOUNCE_MS);
+  }
+
+  const observer = new MutationObserver(scheduleCapture);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "value", "data-quantity", "aria-label"]
+  });
+
+  captureCart();
 })();

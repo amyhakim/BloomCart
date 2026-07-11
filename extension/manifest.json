@@ -3,11 +3,34 @@
   "name": "BloomCart Cart Reader",
   "version": "0.1.0",
   "description": "Reads cart pages and extracts product information for BloomCart.",
-  "permissions": ["activeTab", "scripting"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2Q6N2SltllDpyz5Zr3Ns/udRi6c2ZvpGq+OsmYCcwUTdsrtDt6D2/rKXXABmQfulMDhBFoWJao7E/dmwn2hHNQp2sMXSy7bgXD5WvBabuGSWb+ojY0IYIxEOIfGUABrEiuSRgeEdQsz7OaU7QH70rH9rMi3YLkoVwz9jQdN+oo3paWa+J2o02wzWLz+CMFWRDBJ9D03U+ruNohVFD1cO6iEoBwbk0IJcuwUEpXy4zrerpE9lKcX6nJ2J8UAROOhBgZiCLd31p0PVQsekqoey2JEJuCrASpWaAGIGRrSuwHPvj6bmrOK6Gh/T559N6AzbhrNxTvJYZqa0EQ36IpEpYwIDAQAB",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.amazon.com/*",
+    "https://*.walmart.com/*",
+    "https://*.target.com/*"
+  ],
   "action": {
     "default_title": "Read Cart"
   },
   "background": {
     "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.amazon.com/*",
+        "https://*.walmart.com/*",
+        "https://*.target.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:5173/*",
+      "http://127.0.0.1:5173/*"
+    ]
   }
 }
