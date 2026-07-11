@@ -1,1349 +1,1708 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   ContactShadows,
-  Float,
-  RoundedBox,
+  Html,
   Sparkles,
-  Text,
   useCursor,
-  useGLTF,
-} from '@react-three/drei'
-import gsap from 'gsap'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import * as THREE from 'three'
-import CrosshairCursor from './components/CrosshairCursor'
-import './App.css'
+} from "@react-three/drei";
+import gsap from "gsap";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import * as THREE from "three";
 
-type CameraView = 'default' | 'register' | 'waiting' | 'worth' | 'dragon' | 'product'
+/* ============================================================== *
+ *  BloomCart — a cozy low-poly archive for your shopping cart.
+ *  You stand in the middle of the shop; each wall is a shelf of
+ *  2D cards (Worth It / Waiting / Purchased / Recently Added).
+ *  The dragon archivist works the island counter and tells you
+ *  what's worth buying now vs. worth waiting on.
+ *
+ *  Everything is in this one file. The Chrome-extension cart
+ *  capture from the team is preserved (Refresh Cart button +
+ *  background polling).
+ * ============================================================== */
 
-const API_BASE_URL = 'http://localhost:8080'
-const PRODUCT_POLL_INTERVAL_MS = 2000
-const MAX_RENDERED_PRODUCTS = 10
+type Shelf = "Worth It" | "Waiting for a Sale" | "Purchased" | "Recently Added";
+type CameraView =
+  | "default"
+  | "register"
+  | "worth"
+  | "waiting"
+  | "purchased"
+  | "recently";
+
+const API_BASE_URL = "http://localhost:8080";
+const PRODUCT_POLL_INTERVAL_MS = 2000;
+const MAX_RENDERED_PRODUCTS = 10;
+
+/* ------------------------------- data ------------------------------- */
 
 type Product = {
-  id: string
-  name: string
-  price: string
-  lowest: string
-  rating: string
-  verdict: string
-  saleDate: string
-  badge: string
-  shelf: 'Worth It' | 'Waiting for a Sale' | 'Purchased' | 'Recently Added'
-  colorA: string
-  colorB: string
-  position: [number, number, number]
-  graph: number[]
-  isNew?: boolean
-}
+  id: string;
+  name: string;
+  price: string;
+  lowest: string;
+  rating: string;
+  verdict: string;
+  saleDate: string;
+  badge: string;
+  shelf: Shelf;
+  colorA: string;
+  colorB: string;
+  graph: number[];
+  isNew?: boolean;
+  position?: [number, number, number];
+};
 
 type DatabaseProduct = {
-  id: string
-  source_site: string
-  source_product_id: string | null
-  source_url: string | null
-  cart_url: string | null
-  name: string
-  price: number | null
-  currency: string | null
-  quantity: number | null
-  image_url: string | null
-  captured_at: string | null
-  last_seen_at: string | null
-  lowest_price: number | null
-  rating: string | null
-  verdict: string | null
-  badge: string | null
-  shelf: Product['shelf'] | null
-}
+  id: string;
+  source_site: string;
+  source_product_id: string | null;
+  source_url: string | null;
+  cart_url: string | null;
+  name: string;
+  price: number | null;
+  currency: string | null;
+  quantity: number | null;
+  image_url: string | null;
+  captured_at: string | null;
+  last_seen_at: string | null;
+  lowest_price: number | null;
+  rating: string | null;
+  verdict: string | null;
+  badge: string | null;
+  shelf: string | null;
+};
 
 type ProductsResponse = {
-  products: DatabaseProduct[]
-}
-
-const extensionProductPositions: Array<[number, number, number]> = [
-  [-2.35, 2.05, -2.66],
-  [-1.45, 2.05, -2.66],
-  [1.45, 2.05, -2.66],
-  [2.35, 2.05, -2.66],
-  [-2.35, 0.95, -2.66],
-  [-1.45, 0.95, -2.66],
-  [-0.45, 0.95, -2.66],
-  [0.45, 0.95, -2.66],
-  [1.45, 0.95, -2.66],
-  [2.35, 0.95, -2.66],
-]
+  products: DatabaseProduct[];
+};
 
 const productPalettes = [
-  ['#9cbad6', '#d9b3d7'],
-  ['#dcbf91', '#879f7a'],
-  ['#cbd7b3', '#f6dec8'],
-  ['#c89253', '#f3dca6'],
-  ['#b98d8d', '#8aa6b5'],
-  ['#ead9a8', '#b5a1c8'],
-  ['#d78d68', '#fff0d9'],
-  ['#a6c8ba', '#e7c49b'],
-  ['#c7b1d7', '#f0d7a6'],
-  ['#9db1bd', '#d8aa8a'],
-]
+  ["#9cbad6", "#d9b3d7"],
+  ["#dcbf91", "#879f7a"],
+  ["#cbd7b3", "#f6dec8"],
+  ["#c89253", "#f3dca6"],
+  ["#b98d8d", "#8aa6b5"],
+  ["#ead9a8", "#b5a1c8"],
+  ["#d78d68", "#fff0d9"],
+  ["#a6c8ba", "#e7c49b"],
+  ["#c7b1d7", "#f0d7a6"],
+  ["#9db1bd", "#d8aa8a"],
+];
 
-const cameraViews: Record<Exclude<CameraView, 'product'>, { position: THREE.Vector3; lookAt: THREE.Vector3 }> = {
-  default: {
-    position: new THREE.Vector3(0, 1.75, 5.6),
-    lookAt: new THREE.Vector3(0, 1.15, -0.9),
+/** Each shelf lives on one wall, with its own accent + camera view. */
+const SHELF_META: Record<
+  Shelf,
+  {
+    color: string;
+    view: CameraView;
+    wall: "back" | "right" | "front" | "left";
+    blurb: string;
+  }
+> = {
+  "Worth It": {
+    color: "#7bb45f",
+    view: "worth",
+    wall: "back",
+    blurb: "Good price for the quality — grab it.",
   },
-  register: {
-    position: new THREE.Vector3(0, 1.35, 3.1),
-    lookAt: new THREE.Vector3(0, 1.0, 0.65),
+  "Waiting for a Sale": {
+    color: "#e0a94e",
+    view: "waiting",
+    wall: "right",
+    blurb: "Likely to drop soon. Hold tight.",
   },
-  waiting: {
-    position: new THREE.Vector3(-2.25, 1.75, 1.1),
-    lookAt: new THREE.Vector3(-2.25, 1.35, -2.45),
+  Purchased: {
+    color: "#6f9fd8",
+    view: "purchased",
+    wall: "left",
+    blurb: "Already yours. Nice one.",
   },
-  worth: {
-    position: new THREE.Vector3(2.25, 1.75, 1.1),
-    lookAt: new THREE.Vector3(2.25, 1.35, -2.45),
+  "Recently Added": {
+    color: "#a98fd0",
+    view: "recently",
+    wall: "front",
+    blurb: "Fresh from your cart, being analyzed.",
   },
-  dragon: {
-    position: new THREE.Vector3(0.05, 1.45, 2.35),
-    lookAt: new THREE.Vector3(0, 1.28, -0.55),
-  },
-}
+};
+
+const SHELF_ORDER: Shelf[] = [
+  "Worth It",
+  "Waiting for a Sale",
+  "Purchased",
+  "Recently Added",
+];
 
 const initialProducts: Product[] = [
   {
-    id: 'linen-tote',
-    name: 'Linen Market Tote',
-    price: '$34',
-    lowest: '$27',
-    rating: '92 / 100',
-    verdict: 'Worth it now',
-    saleDate: 'Jul 18',
-    badge: 'Worth It',
-    shelf: 'Worth It',
-    colorA: '#dcbf91',
-    colorB: '#879f7a',
-    position: [1.45, 2.05, -2.66],
-    graph: [0.38, 0.45, 0.41, 0.35, 0.3],
+    id: "sneakers",
+    name: "Retro Sneakers",
+    price: "$89",
+    lowest: "$62",
+    rating: "91 / 100",
+    verdict: "Worth it now",
+    saleDate: "On sale",
+    badge: "Worth It",
+    shelf: "Worth It",
+    colorA: "#b7c7e2",
+    colorB: "#8aa6c9",
+    graph: [0.42, 0.4, 0.36, 0.34, 0.3],
   },
   {
-    id: 'matcha-mug',
-    name: 'Matcha Ceramic Mug',
-    price: '$22',
-    lowest: '$18',
-    rating: '88 / 100',
-    verdict: 'Cozy pick',
-    saleDate: 'Jul 24',
-    badge: 'Worth It',
-    shelf: 'Worth It',
-    colorA: '#cbd7b3',
-    colorB: '#f6dec8',
-    position: [2.35, 2.05, -2.66],
-    graph: [0.5, 0.43, 0.44, 0.37, 0.33],
+    id: "mug",
+    name: "Matcha Ceramic Mug",
+    price: "$22",
+    lowest: "$18",
+    rating: "88 / 100",
+    verdict: "Cozy pick",
+    saleDate: "Jul 24",
+    badge: "Worth It",
+    shelf: "Worth It",
+    colorA: "#cbd7b3",
+    colorB: "#8fae7d",
+    graph: [0.5, 0.44, 0.43, 0.38, 0.35],
   },
   {
-    id: 'desk-lamp',
-    name: 'Brass Reading Lamp',
-    price: '$78',
-    lowest: '$61',
-    rating: '84 / 100',
-    verdict: 'Wait one drop',
-    saleDate: 'Aug 02',
-    badge: 'Waiting',
-    shelf: 'Waiting for a Sale',
-    colorA: '#c89253',
-    colorB: '#f3dca6',
-    position: [-2.35, 2.05, -2.66],
-    graph: [0.75, 0.72, 0.64, 0.58, 0.52],
+    id: "lamp",
+    name: "Brass Reading Lamp",
+    price: "$78",
+    lowest: "$61",
+    rating: "84 / 100",
+    verdict: "Wait one drop",
+    saleDate: "Aug 02",
+    badge: "Waiting",
+    shelf: "Waiting for a Sale",
+    colorA: "#f3dca6",
+    colorB: "#c89253",
+    graph: [0.78, 0.74, 0.66, 0.6, 0.55],
   },
   {
-    id: 'wool-rug',
-    name: 'Mini Wool Rug',
-    price: '$96',
-    lowest: '$72',
-    rating: '80 / 100',
-    verdict: 'Watch closely',
-    saleDate: 'Aug 09',
-    badge: 'Waiting',
-    shelf: 'Waiting for a Sale',
-    colorA: '#b98d8d',
-    colorB: '#8aa6b5',
-    position: [-1.45, 2.05, -2.66],
+    id: "rug",
+    name: "Mini Wool Rug",
+    price: "$96",
+    lowest: "$72",
+    rating: "80 / 100",
+    verdict: "Watch closely",
+    saleDate: "Aug 09",
+    badge: "Waiting",
+    shelf: "Waiting for a Sale",
+    colorA: "#c9a5a5",
+    colorB: "#8aa6b5",
     graph: [0.8, 0.72, 0.7, 0.62, 0.55],
   },
   {
-    id: 'plush-fox',
-    name: 'Pocket Fox Plush',
-    price: '$19',
-    lowest: '$15',
-    rating: '95 / 100',
-    verdict: 'Purchased joy',
-    saleDate: 'Bought',
-    badge: 'Purchased',
-    shelf: 'Purchased',
-    colorA: '#d78d68',
-    colorB: '#fff0d9',
-    position: [-0.45, 0.95, -2.66],
+    id: "fox",
+    name: "Pocket Fox Plush",
+    price: "$19",
+    lowest: "$15",
+    rating: "95 / 100",
+    verdict: "Purchased joy",
+    saleDate: "Bought",
+    badge: "Purchased",
+    shelf: "Purchased",
+    colorA: "#e6b391",
+    colorB: "#d78d68",
     graph: [0.48, 0.41, 0.39, 0.36, 0.32],
   },
   {
-    id: 'paper-notes',
-    name: 'Handmade Notes',
-    price: '$12',
-    lowest: '$9',
-    rating: '90 / 100',
-    verdict: 'Lovely refill',
-    saleDate: 'Jul 29',
-    badge: 'Added',
-    shelf: 'Recently Added',
-    colorA: '#ead9a8',
-    colorB: '#b5a1c8',
-    position: [0.45, 0.95, -2.66],
+    id: "notes",
+    name: "Handmade Notes",
+    price: "$12",
+    lowest: "$9",
+    rating: "90 / 100",
+    verdict: "Lovely refill",
+    saleDate: "Jul 29",
+    badge: "Added",
+    shelf: "Recently Added",
+    colorA: "#ead9a8",
+    colorB: "#b5a1c8",
     graph: [0.55, 0.49, 0.47, 0.42, 0.36],
   },
-]
+];
 
-const ArchiveScene = lazy(async () => ({ default: Scene }))
+/* --------------------------- extension bridge --------------------------- */
 
 function getStableHash(value: string) {
-  let hash = 0
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index)
-    hash |= 0
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
   }
-
-  return Math.abs(hash).toString(36)
+  return Math.abs(hash).toString(36);
 }
 
 async function getDatabaseProducts() {
-  const response = await fetch(`${API_BASE_URL}/products?limit=${MAX_RENDERED_PRODUCTS}`)
+  const response = await fetch(`${API_BASE_URL}/products?limit=${MAX_RENDERED_PRODUCTS}`);
 
   if (!response.ok) {
-    throw new Error(`Product API returned ${response.status}`)
+    throw new Error(`Product API returned ${response.status}`);
   }
 
-  const payload = (await response.json()) as ProductsResponse
-  return payload.products
+  const payload = (await response.json()) as ProductsResponse;
+  return payload.products;
 }
 
 function formatProductPrice(product: DatabaseProduct) {
   if (product.price === null) {
-    return 'Unknown'
+    return "Unknown";
   }
 
-  const currencyPrefix = product.currency === 'USD' ? '$' : product.currency ? `${product.currency} ` : ''
-  return `${currencyPrefix}${product.price.toFixed(2)}`
+  const currencyPrefix = product.currency === "USD" ? "$" : product.currency ? `${product.currency} ` : "";
+  return `${currencyPrefix}${product.price.toFixed(2)}`;
 }
 
 function formatCapturedDate(value: string | null) {
   if (!value) {
-    return 'Captured'
+    return "Captured";
   }
 
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit' }).format(new Date(value))
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit" }).format(new Date(value));
+}
+
+function normalizeShelf(value: string | null): Shelf {
+  if (
+    value === "Worth It" ||
+    value === "Waiting for a Sale" ||
+    value === "Purchased" ||
+    value === "Recently Added"
+  ) {
+    return value;
+  }
+
+  return "Recently Added";
 }
 
 function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Product[] {
   return databaseProducts.slice(0, MAX_RENDERED_PRODUCTS).map((item, index) => {
-    const price = formatProductPrice(item)
-    const lowest = item.lowest_price === null ? price : formatProductPrice({ ...item, price: item.lowest_price })
-    const hash = getStableHash(`${item.source_site}|${item.id}|${item.source_product_id ?? ''}`)
-    const palette = productPalettes[index % productPalettes.length]
+    const price = formatProductPrice(item);
+    const lowest = item.lowest_price === null ? price : formatProductPrice({ ...item, price: item.lowest_price });
+    const hash = getStableHash(`${item.source_site}|${item.id}|${item.source_product_id ?? ""}`);
+    const palette = productPalettes[index % productPalettes.length];
 
     return {
-      id: `extension-${hash}`,
+      id: `db-${hash}`,
       name: item.name,
       price,
       lowest,
-      rating: item.rating || 'Analyzing',
-      verdict: item.verdict || 'Recently captured',
+      rating: item.rating || "Analyzing",
+      verdict: item.verdict || "Recently captured",
       saleDate: formatCapturedDate(item.captured_at),
-      badge: item.badge || (item.quantity && item.quantity > 1 ? `Qty ${item.quantity}` : 'New'),
-      shelf: item.shelf || 'Recently Added',
+      badge: item.badge || (item.quantity && item.quantity > 1 ? `Qty ${item.quantity}` : "New"),
+      shelf: normalizeShelf(item.shelf),
       colorA: palette[0],
       colorB: palette[1],
-      position: extensionProductPositions[index],
       graph: [0.68, 0.61, 0.56, 0.5, 0.45],
       isNew: true,
-    }
-  })
+    };
+  });
 }
 
-function App() {
-  const [view, setView] = useState<CameraView>('default')
-  const [products, setProducts] = useState<Product[]>(initialProducts)
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [notification, setNotification] = useState('Dragon archivist is ready.')
-  const lastProductSignature = useRef('')
+function emojiFor(name: string) {
+  const n = name.toLowerCase();
+  const table: [string, string][] = [
+    ["sneaker", "👟"],
+    ["shoe", "👟"],
+    ["mug", "🍵"],
+    ["matcha", "🍵"],
+    ["tea", "🫖"],
+    ["lamp", "💡"],
+    ["rug", "🧶"],
+    ["fox", "🦊"],
+    ["plush", "🧸"],
+    ["note", "📓"],
+    ["book", "📚"],
+    ["headphone", "🎧"],
+    ["camera", "📷"],
+    ["tote", "👜"],
+    ["bag", "👜"],
+    ["watch", "⌚"],
+    ["candle", "🕯️"],
+    ["plant", "🪴"],
+  ];
+  for (const [key, emoji] of table) if (n.includes(key)) return emoji;
+  return "🛍️";
+}
 
-  const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null
+/* ------------------------------ room metrics ------------------------------ */
+
+const WALL = 3.6; // half-width of the room / distance to each wall
+const OUT = WALL - 0.16; // card plane just inside the wall
+
+const cameraViews: Record<
+  CameraView,
+  { position: THREE.Vector3; lookAt: THREE.Vector3 }
+> = {
+  default: {
+    position: new THREE.Vector3(0, 1.52, 0.35),
+    lookAt: new THREE.Vector3(0, 1.35, -3.6),
+  },
+  register: {
+    position: new THREE.Vector3(0, 1.5, 0.55),
+    lookAt: new THREE.Vector3(0, 0.72, -1.15),
+  },
+  worth: {
+    position: new THREE.Vector3(0, 1.55, 0.2),
+    lookAt: new THREE.Vector3(0, 1.85, -3.6),
+  },
+  waiting: {
+    position: new THREE.Vector3(0, 1.55, 0),
+    lookAt: new THREE.Vector3(3.6, 1.85, 0),
+  },
+  purchased: {
+    position: new THREE.Vector3(0, 1.55, 0),
+    lookAt: new THREE.Vector3(-3.6, 1.85, 0),
+  },
+  recently: {
+    position: new THREE.Vector3(0, 1.55, 0),
+    lookAt: new THREE.Vector3(0, 1.85, 3.6),
+  },
+};
+
+/** Where a card sits on its wall, given its index within that shelf. */
+function wallSlot(
+  wall: Shelf,
+  i: number,
+  total: number,
+): { position: [number, number, number] } {
+  const perRow = 4;
+  const row = Math.floor(i / perRow);
+  const col = i % perRow;
+  const inRow = Math.min(perRow, total - row * perRow);
+  const spread = 1.35;
+  const off = (col - (inRow - 1) / 2) * spread;
+  const y = 2.05 - row * 0.82;
+  switch (SHELF_META[wall].wall) {
+    case "back":
+      return { position: [off, y, -OUT] };
+    case "front":
+      return { position: [-off, y, OUT] };
+    case "right":
+      return { position: [OUT, y, -off] };
+    case "left":
+      return { position: [-OUT, y, off] };
+  }
+}
+
+/* ================================ app ================================ */
+
+function App() {
+  const [view, setView] = useState<CameraView>("default");
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [notification, setNotification] = useState(
+    "Hi! I\u2019m Sprout. Drag to look around your archive.",
+  );
+  const lastSignature = useRef("");
+
+  const selected = products.find((p) => p.id === selectedId) ?? null;
 
   const syncDatabaseProducts = useCallback(async (manual = false) => {
     if (manual) {
-      setNotification('Checking saved BloomCart products...')
+      setNotification("Checking saved BloomCart products...");
     }
 
-    let databaseProducts: DatabaseProduct[]
+    let databaseProducts: DatabaseProduct[];
 
     try {
-      databaseProducts = await getDatabaseProducts()
+      databaseProducts = await getDatabaseProducts();
     } catch (error) {
-      if (manual || !lastProductSignature.current) {
-        setNotification(`Product database unavailable: ${error instanceof Error ? error.message : 'unknown error'}`)
+      if (manual || !lastSignature.current) {
+        setNotification(
+          `Product database unavailable: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
       }
-      return
+      return;
     }
 
     if (!databaseProducts.length) {
-      if (manual || !lastProductSignature.current) {
-        setNotification('Waiting for the extension to save cart products.')
+      if (manual || !lastSignature.current) {
+        setNotification("Waiting for the extension to save cart products.");
       }
-      return
+      return;
     }
 
     const signature = JSON.stringify({
       products: databaseProducts.slice(0, MAX_RENDERED_PRODUCTS),
-    })
+    });
 
-    if (!manual && signature === lastProductSignature.current) {
-      return
+    if (!manual && signature === lastSignature.current) {
+      return;
     }
 
-    lastProductSignature.current = signature
+    lastSignature.current = signature;
 
-    const capturedProducts = databaseProductsToProducts(databaseProducts)
-    const visibleCount = capturedProducts.length
-    const site = databaseProducts[0]?.source_site ?? 'the database'
+    const capturedProducts = databaseProductsToProducts(databaseProducts);
+    const visibleCount = capturedProducts.length;
+    const site = databaseProducts[0]?.source_site ?? "the database";
 
-    setProducts(capturedProducts)
-    setSelectedProductId(capturedProducts[0]?.id ?? null)
-    setView(capturedProducts[0] ? 'product' : 'default')
+    setProducts(capturedProducts);
+    setSelectedId(null);
+    setView("recently");
     setNotification(
       visibleCount
-        ? `${visibleCount} saved product${visibleCount === 1 ? '' : 's'} loaded from ${site}.`
-        : 'No saved products found yet.',
-    )
-    setIsAnalyzing(true)
-    window.setTimeout(() => setIsAnalyzing(false), 1200)
-  }, [])
+        ? `${visibleCount} saved product${visibleCount === 1 ? "" : "s"} loaded from ${site}.`
+        : "No saved products found yet.",
+    );
+    setIsAnalyzing(true);
+    window.setTimeout(() => setIsAnalyzing(false), 1200);
+  }, []);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setSelectedProductId(null)
-        setView('default')
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (selectedId) setSelectedId(null);
+      else setView("default");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
 
   useEffect(() => {
-    const initialPollId = window.setTimeout(() => void syncDatabaseProducts(), 0)
-    const intervalId = window.setInterval(() => void syncDatabaseProducts(), PRODUCT_POLL_INTERVAL_MS)
+    const initial = window.setTimeout(() => void syncDatabaseProducts(), 0);
+    const interval = window.setInterval(
+      () => void syncDatabaseProducts(),
+      PRODUCT_POLL_INTERVAL_MS,
+    );
 
     return () => {
-      window.clearTimeout(initialPollId)
-      window.clearInterval(intervalId)
-    }
-  }, [syncDatabaseProducts])
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [syncDatabaseProducts]);
+
+  const counts = useMemo(() => {
+    const c: Record<Shelf, number> = {
+      "Worth It": 0,
+      "Waiting for a Sale": 0,
+      Purchased: 0,
+      "Recently Added": 0,
+    };
+    products.forEach((p) => (c[p.shelf] += 1));
+    return c;
+  }, [products]);
 
   return (
-    <main className="app-shell">
-      <div className="world-frame">
-        <Canvas
-          shadows
-          dpr={[1, 1.8]}
-          camera={{ position: [0, 2.4, 7], fov: 43, near: 0.1, far: 100 }}
-          gl={{ antialias: true }}
-        >
-          <color attach="background" args={['#f5ead8']} />
-          <Suspense fallback={<LoadingRoom />}>
-            <ArchiveScene
-              isAnalyzing={isAnalyzing}
-              products={products}
-              selectedProduct={selectedProduct}
-              selectedProductId={selectedProductId}
-              setSelectedProductId={setSelectedProductId}
-              setView={setView}
-              view={view}
-            />
-          </Suspense>
-        </Canvas>
-      </div>
-      <CrosshairCursor />
-
-      <nav className="top-controls" aria-label="BloomCart controls">
-        <button type="button" onClick={() => void syncDatabaseProducts(true)}>Refresh Products</button>
-        <button type="button" onClick={() => setView('default')}>Settings</button>
-        <button type="button" className="notification-pill">{notification}</button>
-      </nav>
-
-      <button
-        type="button"
-        className="back-control"
-        onClick={() => {
-          setSelectedProductId(null)
-          setView('default')
-        }}
+    <div className="bc-shell">
+      <StyleTag />
+      <Canvas
+        shadows
+        dpr={[1, 1.8]}
+        camera={{ position: [0, 1.6, 5], fov: 40, near: 0.1, far: 60 }}
+        gl={{ antialias: true }}
       >
-        Back / ESC
-      </button>
-    </main>
-  )
+        <color attach="background" args={["#efe6d2"]} />
+        <fog attach="fog" args={["#efe6d2", 7, 15]} />
+        <Scene
+          isAnalyzing={isAnalyzing}
+          products={products}
+          view={view}
+          setView={setView}
+          onOpen={(id) => setSelectedId(id)}
+        />
+      </Canvas>
+
+      {/* ---------- 2D overlay UI ---------- */}
+      <header className="bc-topbar">
+        <div className="bc-brand">
+          <span className="bc-logo" aria-hidden>
+            🐲
+          </span>
+          <div>
+            <div className="bc-name">BloomCart</div>
+            <div className="bc-tag">Is it worth it? Ask the archivist.</div>
+          </div>
+        </div>
+        <nav className="bc-legend" aria-label="Shelves">
+          {SHELF_ORDER.map((shelf) => (
+            <button
+              key={shelf}
+              className="bc-legend-item"
+              onClick={() => setView(SHELF_META[shelf].view)}
+            >
+              <i style={{ background: SHELF_META[shelf].color }} />
+              {shelf}
+              <b>{counts[shelf]}</b>
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <div className="bc-speech">
+        <span className="bc-speech-tail" aria-hidden />
+        {isAnalyzing ? "Analyzing price history and quality…" : notification}
+      </div>
+
+      <div className="bc-actions">
+        <button
+          className="bc-btn bc-btn-primary"
+          onClick={() => void syncDatabaseProducts(true)}
+        >
+          Refresh Products
+        </button>
+        <button
+          className="bc-btn"
+          onClick={() => {
+            setSelectedId(null);
+            setView("default");
+          }}
+        >
+          Reset view
+        </button>
+      </div>
+
+      <div className="bc-hint">
+        Drag to look around · Click a card for details · Esc to go back
+      </div>
+
+      {selected && (
+        <DetailModal product={selected} onClose={() => setSelectedId(null)} />
+      )}
+    </div>
+  );
 }
+
+/* =============================== 3D scene =============================== */
 
 function Scene({
   isAnalyzing,
   products,
-  selectedProduct,
-  selectedProductId,
-  setSelectedProductId,
-  setView,
   view,
+  setView,
+  onOpen,
 }: {
-  isAnalyzing: boolean
-  products: Product[]
-  selectedProduct: Product | null
-  selectedProductId: string | null
-  setSelectedProductId: (id: string | null) => void
-  setView: (view: CameraView) => void
-  view: CameraView
+  isAnalyzing: boolean;
+  products: Product[];
+  view: CameraView;
+  setView: (v: CameraView) => void;
+  onOpen: (id: string) => void;
 }) {
   return (
     <>
-      <CameraRig selectedProduct={selectedProduct} view={view} />
-      <ambientLight intensity={0.9} color="#f7dfbd" />
+      <CameraRig view={view} />
+
+      <ambientLight intensity={0.95} color="#fbe9c8" />
+      <hemisphereLight args={["#fff2d8", "#b79a74", 0.55]} />
       <directionalLight
         castShadow
-        color="#ffd49a"
-        intensity={2.7}
-        position={[-3.8, 5.4, 4.6]}
+        color="#ffe0ab"
+        intensity={2.2}
+        position={[3.5, 6, 4]}
         shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+      >
+        <orthographicCamera
+          attach="shadow-camera"
+          args={[-6, 6, 6, -6, 0.1, 20]}
+        />
+      </directionalLight>
+      <pointLight
+        color="#ffd79a"
+        intensity={0.9}
+        position={[0, 3, 0]}
+        distance={9}
       />
-      <pointLight color="#ffd28d" intensity={2.2} position={[2.7, 2.55, 0.4]} distance={5.5} />
-      <pointLight color="#ffdcaa" intensity={1.5} position={[-2.8, 1.9, -1.35]} distance={3.5} />
 
-      <RoomShell />
-      <Decorations />
-      <ArchiveShelves
-        products={products}
-        selectedProductId={selectedProductId}
-        setSelectedProductId={setSelectedProductId}
-        setView={setView}
-      />
-      <RegisterArea isAnalyzing={isAnalyzing} setView={setView} />
+      <Room />
+      <WallShelves setView={setView} />
+      <CardWall products={products} onOpen={onOpen} />
+      <IslandCounter isAnalyzing={isAnalyzing} setView={setView} />
       <Dragon isAnalyzing={isAnalyzing} setView={setView} />
-      <FloatingDust />
-      <ContactShadows opacity={0.28} scale={9} blur={2.6} far={4.5} position={[0, 0.012, 0]} />
+      <Cat position={[0.95, 0.66, -1.05]} />
+      <Dog position={[-1.4, 0.0, -0.35]} />
+      <Bird position={[-0.85, 0.66, -1.0]} />
+      <CornerPlants />
+
+      <Sparkles
+        count={60}
+        scale={[7, 3.5, 7]}
+        size={1.1}
+        speed={0.12}
+        color="#ffe4b7"
+        position={[0, 1.9, 0]}
+      />
+      <ContactShadows
+        opacity={0.24}
+        scale={9}
+        blur={2.6}
+        far={5}
+        position={[0, 0.01, 0]}
+      />
     </>
-  )
+  );
 }
 
-function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null; view: CameraView }) {
-  const { camera, gl, mouse } = useThree()
-  const basePosition = useRef(new THREE.Vector3(0, 2.35, 7))
-  const targetYaw = useRef(0)
-  const targetPitch = useRef(0)
-  const smoothYaw = useRef(0)
-  const smoothPitch = useRef(0)
-  const smoothMouse = useRef(new THREE.Vector2())
-  const desiredPosition = useRef(new THREE.Vector3())
-  const desiredLookAt = useRef(new THREE.Vector3())
-  const parallaxOffset = useRef(new THREE.Vector3())
-  const lookDirection = useRef(new THREE.Vector3())
-  const dragState = useRef({ active: false, moved: 0 })
+function CameraRig({ view }: { view: CameraView }) {
+  const { camera, gl, mouse } = useThree();
+  const base = useRef(new THREE.Vector3(0, 1.6, 5));
+  const yaw = useRef(0);
+  const pitch = useRef(0);
+  const smYaw = useRef(0);
+  const smPitch = useRef(0);
+  const smMouse = useRef(new THREE.Vector2());
+  const pos = useRef(new THREE.Vector3());
+  const look = useRef(new THREE.Vector3());
+  const par = useRef(new THREE.Vector3());
+  const dir = useRef(new THREE.Vector3());
+  const drag = useRef(false);
 
   useEffect(() => {
-    const canvas = gl.domElement
-    const sensitivity = 0.0032
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return
-      dragState.current.active = true
-      dragState.current.moved = 0
-      canvas.setPointerCapture(event.pointerId)
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!dragState.current.active) return
-      dragState.current.moved += Math.abs(event.movementX) + Math.abs(event.movementY)
-      targetYaw.current -= event.movementX * sensitivity
-      targetPitch.current = THREE.MathUtils.clamp(
-        targetPitch.current - event.movementY * sensitivity,
-        -Math.PI / 2.7,
-        Math.PI / 2.7,
-      )
-    }
-
-    const stopDragging = (event: PointerEvent) => {
-      dragState.current.active = false
-      if (canvas.hasPointerCapture(event.pointerId)) {
-        canvas.releasePointerCapture(event.pointerId)
-      }
-    }
-
-    canvas.addEventListener('pointerdown', handlePointerDown)
-    canvas.addEventListener('pointermove', handlePointerMove)
-    canvas.addEventListener('pointerup', stopDragging)
-    canvas.addEventListener('pointercancel', stopDragging)
-
+    const el = gl.domElement;
+    const sens = 0.003;
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      drag.current = true;
+      el.setPointerCapture(e.pointerId);
+    };
+    const move = (e: PointerEvent) => {
+      if (!drag.current) return;
+      yaw.current -= e.movementX * sens;
+      pitch.current = THREE.MathUtils.clamp(
+        pitch.current - e.movementY * sens,
+        -Math.PI / 3.2,
+        Math.PI / 3.2,
+      );
+    };
+    const up = (e: PointerEvent) => {
+      drag.current = false;
+      if (el.hasPointerCapture(e.pointerId))
+        el.releasePointerCapture(e.pointerId);
+    };
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
     return () => {
-      canvas.removeEventListener('pointerdown', handlePointerDown)
-      canvas.removeEventListener('pointermove', handlePointerMove)
-      canvas.removeEventListener('pointerup', stopDragging)
-      canvas.removeEventListener('pointercancel', stopDragging)
-    }
-  }, [gl])
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, [gl]);
 
   useEffect(() => {
-    const target =
-      view === 'product' && selectedProduct
-        ? {
-            position: new THREE.Vector3(
-              selectedProduct.position[0],
-              selectedProduct.position[1] + 0.18,
-              selectedProduct.position[2] + 1.95,
-            ),
-            lookAt: new THREE.Vector3(...selectedProduct.position),
-          }
-        : cameraViews[view === 'product' ? 'default' : view]
-    const facing = getCameraAngles(target.position, target.lookAt)
-
-    gsap.to(basePosition.current, {
-      x: target.position.x,
-      y: target.position.y,
-      z: target.position.z,
-      duration: 1.9,
-      ease: 'power3.inOut',
-    })
-    gsap.to(targetYaw, {
-      current: facing.yaw,
-      duration: 1.9,
-      ease: 'power3.inOut',
-    })
-    gsap.to(targetPitch, {
-      current: facing.pitch,
-      duration: 1.9,
-      ease: 'power3.inOut',
-    })
-  }, [selectedProduct, view])
+    const t = cameraViews[view];
+    const d = t.lookAt.clone().sub(t.position).normalize();
+    gsap.to(base.current, {
+      x: t.position.x,
+      y: t.position.y,
+      z: t.position.z,
+      duration: 1.5,
+      ease: "power3.inOut",
+    });
+    gsap.to(yaw, {
+      current: Math.atan2(d.x, -d.z),
+      duration: 1.5,
+      ease: "power3.inOut",
+    });
+    gsap.to(pitch, {
+      current: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)),
+      duration: 1.5,
+      ease: "power3.inOut",
+    });
+  }, [view]);
 
   useFrame((_, delta) => {
-    const mouseBlend = 1 - Math.exp(-10 * delta)
-    const cameraBlend = 1 - Math.exp(-7.5 * delta)
-    const rotationBlend = 1 - Math.exp(-12 * delta)
+    const mb = 1 - Math.exp(-10 * delta);
+    const cb = 1 - Math.exp(-8 * delta);
+    const rb = 1 - Math.exp(-12 * delta);
+    smMouse.current.lerp(mouse, mb);
+    smYaw.current = THREE.MathUtils.lerp(smYaw.current, yaw.current, rb);
+    smPitch.current = THREE.MathUtils.lerp(smPitch.current, pitch.current, rb);
+    par.current.set(smMouse.current.x * 0.02, smMouse.current.y * 0.015, 0);
+    pos.current.copy(base.current).add(par.current);
+    dir.current.set(
+      Math.sin(smYaw.current) * Math.cos(smPitch.current),
+      Math.sin(smPitch.current),
+      -Math.cos(smYaw.current) * Math.cos(smPitch.current),
+    );
+    look.current.copy(pos.current).add(dir.current);
+    camera.position.lerp(pos.current, cb);
+    camera.lookAt(look.current);
+  });
 
-    smoothMouse.current.lerp(mouse, mouseBlend)
-    smoothYaw.current = THREE.MathUtils.lerp(smoothYaw.current, targetYaw.current, rotationBlend)
-    smoothPitch.current = THREE.MathUtils.lerp(smoothPitch.current, targetPitch.current, rotationBlend)
-    parallaxOffset.current.set(smoothMouse.current.x * 0.035, smoothMouse.current.y * 0.022, 0)
-    desiredPosition.current.copy(basePosition.current).add(parallaxOffset.current)
-    lookDirection.current.set(
-      Math.sin(smoothYaw.current) * Math.cos(smoothPitch.current),
-      Math.sin(smoothPitch.current),
-      -Math.cos(smoothYaw.current) * Math.cos(smoothPitch.current),
-    )
-    desiredLookAt.current.copy(desiredPosition.current).add(lookDirection.current)
-
-    camera.position.lerp(desiredPosition.current, cameraBlend)
-    camera.lookAt(desiredLookAt.current)
-  })
-
-  return null
+  return null;
 }
 
-function getCameraAngles(position: THREE.Vector3, lookAt: THREE.Vector3) {
-  const direction = lookAt.clone().sub(position).normalize()
+/* ------------------------------- room shell ------------------------------- */
 
-  return {
-    yaw: Math.atan2(direction.x, -direction.z),
-    pitch: Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)),
-  }
-}
-
-function LoadingRoom() {
-  return (
-    <group position={[0, 1.1, -1]}>
-      <Text color="#7b5e48" fontSize={0.18} anchorX="center">BloomCart archive is opening...</Text>
-    </group>
-  )
-}
-
-function RoomShell() {
+function Room() {
   return (
     <group>
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-        <planeGeometry args={[8.8, 8.2]} />
-        <meshStandardMaterial color="#c99f72" roughness={0.82} />
+      {/* floor */}
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[WALL * 2, WALL * 2]} />
+        <meshStandardMaterial color="#d9b884" roughness={0.95} flatShading />
       </mesh>
-      <mesh receiveShadow position={[0, 2.05, -3.05]}>
-        <boxGeometry args={[8.8, 4.1, 0.16]} />
-        <meshStandardMaterial color="#f1dfc7" roughness={0.9} />
+      {/* walls (flat-shaded low-poly) */}
+      {(
+        [
+          [0, 2, -WALL, 0],
+          [0, 2, WALL, Math.PI],
+          [WALL, 2, 0, -Math.PI / 2],
+          [-WALL, 2, 0, Math.PI / 2],
+        ] as [number, number, number, number][]
+      ).map(([x, y, z, ry], i) => (
+        <mesh key={i} position={[x, y, z]} rotation={[0, ry, 0]} receiveShadow>
+          <planeGeometry args={[WALL * 2, 4]} />
+          <meshStandardMaterial
+            color={i % 2 ? "#efe1c6" : "#f2e4ca"}
+            roughness={0.98}
+            side={THREE.DoubleSide}
+            flatShading
+          />
+        </mesh>
+      ))}
+      {/* soft rug under the counter */}
+      <mesh
+        receiveShadow
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.011, -1.1]}
+      >
+        <circleGeometry args={[1.9, 6]} />
+        <meshStandardMaterial color="#cf9f9a" roughness={0.98} flatShading />
       </mesh>
-      <mesh receiveShadow position={[-4.35, 2.05, 0]}>
-        <boxGeometry args={[0.16, 4.1, 8.2]} />
-        <meshStandardMaterial color="#efe0cc" roughness={0.92} />
+      <mesh
+        receiveShadow
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.013, -1.1]}
+      >
+        <circleGeometry args={[1.35, 6]} />
+        <meshStandardMaterial color="#e0bdaf" roughness={0.98} flatShading />
       </mesh>
-      <mesh receiveShadow position={[4.35, 2.05, 0]}>
-        <boxGeometry args={[0.16, 4.1, 8.2]} />
-        <meshStandardMaterial color="#efe0cc" roughness={0.92} />
-      </mesh>
-      <mesh position={[-3.25, 2.62, -3.16]}>
-        <boxGeometry args={[1.22, 1.05, 0.08]} />
-        <meshStandardMaterial color="#ffe8bd" emissive="#ffc875" emissiveIntensity={0.32} />
-      </mesh>
-      <mesh position={[-3.25, 2.62, -3.1]}>
-        <boxGeometry args={[1.36, 1.18, 0.08]} />
-        <meshStandardMaterial color="#a87952" roughness={0.65} />
-      </mesh>
-      <mesh position={[-2.92, 2.62, -3.23]} rotation={[0, 0, -0.4]}>
-        <boxGeometry args={[0.05, 1.25, 0.04]} />
-        <meshStandardMaterial color="#fff1cf" emissive="#ffd080" emissiveIntensity={0.5} />
-      </mesh>
-      <mesh position={[-3.58, 2.62, -3.23]} rotation={[0, 0, 0.4]}>
-        <boxGeometry args={[0.05, 1.25, 0.04]} />
-        <meshStandardMaterial color="#fff1cf" emissive="#ffd080" emissiveIntensity={0.5} />
-      </mesh>
-      <Rug />
+      {/* string lights near the ceiling */}
+      <FairyRing />
     </group>
-  )
+  );
 }
 
-function Rug() {
+function FairyRing() {
+  const bulbs = 28;
   return (
-    <group position={[0, 0.025, 2.15]} rotation={[-Math.PI / 2, 0, 0]}>
-      <RoundedBox args={[3.4, 1.72, 0.025]} radius={0.08} smoothness={8}>
-        <meshStandardMaterial color="#bd8f86" roughness={0.95} />
-      </RoundedBox>
-      {[-1.2, -0.6, 0, 0.6, 1.2].map((x) => (
-        <mesh key={x} position={[x, 0, 0.025]}>
-          <boxGeometry args={[0.045, 1.58, 0.012]} />
-          <meshStandardMaterial color="#e5ccb0" />
+    <group position={[0, 3.35, 0]}>
+      {Array.from({ length: bulbs }, (_, i) => {
+        const a = (i / bulbs) * Math.PI * 2;
+        const r = WALL - 0.35;
+        return (
+          <mesh
+            key={i}
+            position={[
+              Math.cos(a) * r,
+              Math.sin(i * 0.9) * 0.05,
+              Math.sin(a) * r,
+            ]}
+          >
+            <icosahedronGeometry args={[0.04, 0]} />
+            <meshStandardMaterial
+              color="#ffe4aa"
+              emissive="#ffc86f"
+              emissiveIntensity={0.9}
+              flatShading
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/* ------------------------------ wall shelves ------------------------------ */
+
+function WallShelves({ setView }: { setView: (v: CameraView) => void }) {
+  return (
+    <group>
+      {SHELF_ORDER.map((shelf) => {
+        const wall = SHELF_META[shelf].wall;
+        const ry =
+          wall === "back"
+            ? 0
+            : wall === "front"
+              ? Math.PI
+              : wall === "right"
+                ? -Math.PI / 2
+                : Math.PI / 2;
+        const px =
+          wall === "right" ? WALL - 0.02 : wall === "left" ? -WALL + 0.02 : 0;
+        const pz =
+          wall === "back" ? -WALL + 0.02 : wall === "front" ? WALL - 0.02 : 0;
+        return (
+          <group key={shelf} position={[px, 0, pz]} rotation={[0, ry, 0]}>
+            <ClickableGroup onClick={() => setView(SHELF_META[shelf].view)}>
+              <ShelfLedge y={1.62} color={SHELF_META[shelf].color} />
+              <ShelfLedge y={0.82} color={SHELF_META[shelf].color} />
+            </ClickableGroup>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function ShelfLedge({ y, color }: { y: number; color: string }) {
+  return (
+    <group position={[0, y, 0.12]}>
+      {/* plank */}
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[5.6, 0.1, 0.4]} />
+        <meshStandardMaterial color="#d3a870" roughness={0.85} flatShading />
+      </mesh>
+      {/* front lip */}
+      <mesh position={[0, -0.06, 0.2]}>
+        <boxGeometry args={[5.6, 0.06, 0.06]} />
+        <meshStandardMaterial color={color} roughness={0.8} flatShading />
+      </mesh>
+      {/* brackets */}
+      {[-2.4, -0.8, 0.8, 2.4].map((x) => (
+        <mesh key={x} position={[x, -0.16, -0.02]}>
+          <boxGeometry args={[0.1, 0.22, 0.32]} />
+          <meshStandardMaterial color="#b9884f" roughness={0.85} flatShading />
         </mesh>
       ))}
     </group>
-  )
+  );
 }
 
-function RegisterArea({
+/* ----------------------------- 2D card wall ----------------------------- */
+
+function CardWall({
+  products,
+  onOpen,
+}: {
+  products: Product[];
+  onOpen: (id: string) => void;
+}) {
+  const groups = useMemo(() => {
+    const g: Record<Shelf, Product[]> = {
+      "Worth It": [],
+      "Waiting for a Sale": [],
+      Purchased: [],
+      "Recently Added": [],
+    };
+    products.forEach((p) => g[p.shelf].push(p));
+    return g;
+  }, [products]);
+
+  return (
+    <group>
+      {SHELF_ORDER.map((shelf) => {
+        const list = groups[shelf];
+        const meta = SHELF_META[shelf];
+        const wall = meta.wall;
+        // label anchor sits above the top ledge on each wall
+        const labelPos: [number, number, number] =
+          wall === "back"
+            ? [0, 2.7, -OUT]
+            : wall === "front"
+              ? [0, 2.7, OUT]
+              : wall === "right"
+                ? [OUT, 2.7, 0]
+                : [-OUT, 2.7, 0];
+
+        return (
+          <group key={shelf}>
+            <Html position={labelPos} center zIndexRange={[20, 0]}>
+              <div
+                className="bc-shelf-label"
+                style={{ ["--accent" as string]: meta.color }}
+              >
+                {shelf}
+                <span>{list.length}</span>
+              </div>
+            </Html>
+
+            {list.map((p, i) => {
+              const slot = wallSlot(shelf, i, list.length);
+              return (
+                <Html
+                  key={p.id}
+                  position={slot.position}
+                  center
+                  zIndexRange={[15, 0]}
+                >
+                  <button
+                    className={`bc-card ${p.isNew ? "is-new" : ""}`}
+                    style={{ ["--accent" as string]: meta.color }}
+                    onClick={() => onOpen(p.id)}
+                  >
+                    <span
+                      className="bc-card-photo"
+                      style={{
+                        background: `linear-gradient(135deg, ${p.colorA}, ${p.colorB})`,
+                      }}
+                    >
+                      <span className="bc-card-emoji">{emojiFor(p.name)}</span>
+                    </span>
+                    <span className="bc-card-name">{p.name}</span>
+                    <span className="bc-card-foot">
+                      <span className="bc-card-price">{p.price}</span>
+                      <span className="bc-card-pill">{p.badge}</span>
+                    </span>
+                  </button>
+                </Html>
+              );
+            })}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/* ---------------------------- island counter ---------------------------- */
+
+function IslandCounter({
   isAnalyzing,
   setView,
 }: {
-  isAnalyzing: boolean
-  setView: (view: CameraView) => void
+  isAnalyzing: boolean;
+  setView: (v: CameraView) => void;
 }) {
   return (
-    <ClickableGroup onClick={() => setView('register')}>
-      <group position={[0, 0.48, 0.72]}>
-        <RoundedBox castShadow receiveShadow args={[2.55, 0.82, 1.1]} radius={0.08} smoothness={8}>
-          <meshStandardMaterial color="#b98959" roughness={0.72} />
-        </RoundedBox>
-        <mesh position={[0, 0.47, 0.04]}>
-          <boxGeometry args={[2.74, 0.08, 1.22]} />
-          <meshStandardMaterial color="#d7b17d" roughness={0.62} />
+    <ClickableGroup onClick={() => setView("register")}>
+      <group position={[0, 0, -1.15]}>
+        {/* counter body */}
+        <mesh castShadow receiveShadow position={[0, 0.32, 0]}>
+          <boxGeometry args={[2.1, 0.64, 1.0]} />
+          <meshStandardMaterial color="#a98fd0" roughness={0.8} flatShading />
         </mesh>
-        <group position={[-0.55, 0.66, -0.05]}>
-          <mesh castShadow rotation={[-0.35, 0, 0]}>
-            <boxGeometry args={[0.55, 0.38, 0.08]} />
-            <meshStandardMaterial color="#6f7f76" roughness={0.5} />
+        {/* counter top */}
+        <mesh castShadow position={[0, 0.67, 0]}>
+          <boxGeometry args={[2.26, 0.1, 1.14]} />
+          <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
+        </mesh>
+        {/* retro monitor */}
+        <group position={[0.62, 0.85, 0.05]} rotation={[0, -0.3, 0]}>
+          <mesh castShadow>
+            <boxGeometry args={[0.5, 0.42, 0.36]} />
+            <meshStandardMaterial color="#e9dcc4" roughness={0.7} flatShading />
           </mesh>
-          <Text position={[0, 0.04, 0.055]} rotation={[-0.35, 0, 0]} fontSize={0.045} color="#fff4d4" anchorX="center">
-            AI cart notes
-          </Text>
+          <mesh position={[0, 0.02, 0.19]}>
+            <boxGeometry args={[0.38, 0.28, 0.02]} />
+            <meshStandardMaterial
+              color="#20301f"
+              emissive="#1c2b1b"
+              emissiveIntensity={0.5}
+              flatShading
+            />
+          </mesh>
+          <Html
+            position={[0, 0.02, 0.21]}
+            center
+            distanceFactor={2.2}
+            zIndexRange={[10, 0]}
+          >
+            <div className="bc-crt">
+              <div>QUALITY {isAnalyzing ? "████" : "██▚▚"}</div>
+              <div>PRICE&nbsp;&nbsp; {isAnalyzing ? "███▚" : "██▚▚"}</div>
+              <div>HYPE&nbsp;&nbsp;&nbsp; {isAnalyzing ? "██▚▚" : "█▚▚▚"}</div>
+              <div className="bc-crt-grade">{isAnalyzing ? "B+" : "A"}</div>
+            </div>
+          </Html>
         </group>
+        {/* scanner */}
         <Scanner isAnalyzing={isAnalyzing} />
-        <Keyboard isAnalyzing={isAnalyzing} />
-        <DeskObjects />
-        {isAnalyzing && <ScanProduct />}
+        {/* mug */}
+        <group position={[-0.05, 0.78, 0.32]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.08, 0.07, 0.14, 6]} />
+            <meshStandardMaterial color="#c6b4e3" roughness={0.7} flatShading />
+          </mesh>
+        </group>
       </group>
     </ClickableGroup>
-  )
+  );
 }
 
 function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
-  const ring = useRef<THREE.Mesh>(null)
-
-  useFrame((state) => {
-    if (!ring.current) return
-    ring.current.rotation.z = state.clock.elapsedTime * 2.2
-    ring.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 4) * 0.07)
-  })
-
+  const ring = useRef<THREE.Mesh>(null);
+  useFrame((s) => {
+    if (!ring.current) return;
+    ring.current.rotation.z = s.clock.elapsedTime * 2;
+    ring.current.scale.setScalar(
+      1 + Math.sin(s.clock.elapsedTime * 4) * (isAnalyzing ? 0.12 : 0.03),
+    );
+  });
   return (
-    <group position={[0.35, 0.67, -0.07]}>
-      <RoundedBox castShadow args={[0.46, 0.13, 0.38]} radius={0.04} smoothness={8}>
-        <meshStandardMaterial color="#a77c52" roughness={0.78} />
-      </RoundedBox>
-      <mesh position={[0, 0.075, 0]} ref={ring} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.18, 0.009, 8, 48]} />
+    <group position={[-0.6, 0.74, 0.05]}>
+      <mesh castShadow>
+        <boxGeometry args={[0.42, 0.1, 0.34]} />
+        <meshStandardMaterial color="#9c7c52" roughness={0.8} flatShading />
+      </mesh>
+      <mesh ref={ring} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.15, 0.012, 6, 18]} />
         <meshStandardMaterial
-          color={isAnalyzing ? '#ffd591' : '#e8c79d'}
-          emissive={isAnalyzing ? '#ffc46d' : '#8a5a38'}
-          emissiveIntensity={isAnalyzing ? 1 : 0.16}
+          color={isAnalyzing ? "#ffd591" : "#e8c79d"}
+          emissive={isAnalyzing ? "#ffc46d" : "#7a4f30"}
+          emissiveIntensity={isAnalyzing ? 1 : 0.15}
+          flatShading
         />
       </mesh>
       {isAnalyzing && (
-        <Sparkles count={28} scale={[0.7, 0.45, 0.7]} size={2.2} speed={0.55} color="#ffe4a8" position={[0, 0.34, 0]} />
+        <Sparkles
+          count={20}
+          scale={[0.5, 0.5, 0.5]}
+          size={2}
+          speed={0.5}
+          color="#ffe4a8"
+          position={[0, 0.3, 0]}
+        />
       )}
     </group>
-  )
+  );
 }
 
-function Keyboard({ isAnalyzing }: { isAnalyzing: boolean }) {
-  return (
-    <group position={[0, 0.66, 0.32]} rotation={[-0.1, 0, 0]}>
-      {Array.from({ length: 16 }, (_, index) => {
-        const x = (index % 8) * 0.07 - 0.245
-        const z = Math.floor(index / 8) * 0.07 - 0.035
-
-        return (
-          <KeyboardKey key={index} index={index} isAnalyzing={isAnalyzing} position={[x, 0, z]} />
-        )
-      })}
-    </group>
-  )
-}
-
-function KeyboardKey({
-  index,
-  isAnalyzing,
-  position,
-}: {
-  index: number
-  isAnalyzing: boolean
-  position: [number, number, number]
-}) {
-  const ref = useRef<THREE.Mesh>(null)
-
-  useFrame((state) => {
-    if (!ref.current) return
-    const tap = isAnalyzing && index % 5 === 0 ? Math.sin(state.clock.elapsedTime * 12 + index) * 0.01 : 0
-    ref.current.position.y = THREE.MathUtils.lerp(ref.current.position.y, tap, 0.28)
-  })
-
-  return (
-    <mesh ref={ref} castShadow position={position}>
-      <boxGeometry args={[0.052, 0.018, 0.046]} />
-      <meshStandardMaterial color="#efe0c7" roughness={0.75} />
-    </mesh>
-  )
-}
-
-function DeskObjects() {
-  return (
-    <group>
-      <group position={[0.92, 0.69, 0.2]}>
-        <mesh castShadow>
-          <cylinderGeometry args={[0.1, 0.1, 0.17, 28]} />
-          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
-        </mesh>
-        <mesh position={[0.115, 0.015, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.055, 0.011, 8, 24]} />
-          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
-        </mesh>
-      </group>
-      <mesh castShadow position={[-0.95, 0.69, 0.28]}>
-        <cylinderGeometry args={[0.09, 0.11, 0.22, 24]} />
-        <meshStandardMaterial color="#b7c9a5" roughness={0.8} />
-      </mesh>
-      <mesh castShadow position={[-0.95, 0.85, 0.28]}>
-        <sphereGeometry args={[0.12, 16, 12]} />
-        <meshStandardMaterial color="#7ea07a" roughness={0.9} />
-      </mesh>
-      <mesh castShadow position={[0.74, 0.68, -0.35]}>
-        <cylinderGeometry args={[0.12, 0.16, 0.14, 32]} />
-        <meshStandardMaterial color="#cfa45f" metalness={0.15} roughness={0.45} />
-      </mesh>
-      <Text position={[0.72, 0.8, -0.35]} fontSize={0.055} color="#765539" anchorX="center">ding</Text>
-      <mesh castShadow position={[-0.25, 0.69, -0.4]} rotation={[0.06, 0.12, 0]}>
-        <boxGeometry args={[0.42, 0.035, 0.28]} />
-        <meshStandardMaterial color="#ead9bd" roughness={0.92} />
-      </mesh>
-    </group>
-  )
-}
-
-function ScanProduct() {
-  const ref = useRef<THREE.Group>(null)
-
-  useFrame((state) => {
-    if (!ref.current) return
-    ref.current.position.y = 1.06 + Math.sin(state.clock.elapsedTime * 2.2) * 0.04
-    ref.current.rotation.y += 0.015
-  })
-
-  return (
-    <group ref={ref} position={[0.35, 1.06, -0.07]}>
-      <mesh castShadow>
-        <sphereGeometry args={[0.16, 28, 18]} />
-        <meshStandardMaterial color="#9cbad6" roughness={0.55} />
-      </mesh>
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.24, 0.008, 8, 64]} />
-        <meshStandardMaterial color="#ffdca4" emissive="#ffc46d" emissiveIntensity={0.8} />
-      </mesh>
-      <Text position={[0.45, 0.18, 0]} fontSize={0.065} color="#7d5d42" anchorX="left">
-        price -14%{'\n'}quality 91{'\n'}save soon
-      </Text>
-    </group>
-  )
-}
+/* ------------------------- low-poly dragon (Sprout) ------------------------- */
 
 function Dragon({
   isAnalyzing,
   setView,
 }: {
-  isAnalyzing: boolean
-  setView: (view: CameraView) => void
+  isAnalyzing: boolean;
+  setView: (v: CameraView) => void;
 }) {
-  const group = useRef<THREE.Group>(null)
-  const head = useRef<THREE.Group>(null)
-  const tail = useRef<THREE.Group>(null)
-  const leftEye = useRef<THREE.Mesh>(null)
-  const rightEye = useRef<THREE.Mesh>(null)
-  const [blink, setBlink] = useState(false)
+  const root = useRef<THREE.Group>(null);
+  const head = useRef<THREE.Group>(null);
+  const lEye = useRef<THREE.Mesh>(null);
+  const rEye = useRef<THREE.Mesh>(null);
+  const [blink, setBlink] = useState(false);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setBlink(true)
-      window.setTimeout(() => setBlink(false), 130)
-    }, 3200)
+    const id = window.setInterval(() => {
+      setBlink(true);
+      window.setTimeout(() => setBlink(false), 120);
+    }, 3600);
+    return () => window.clearInterval(id);
+  }, []);
 
-    return () => window.clearInterval(interval)
-  }, [])
-
-  useFrame((state) => {
-    const time = state.clock.elapsedTime
-
-    if (group.current) {
-      group.current.position.y = 0.86 + Math.sin(time * 1.8) * 0.018
-      group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, isAnalyzing ? -0.25 : 0, 0.05)
+  useFrame((s) => {
+    const t = s.clock.elapsedTime;
+    if (root.current) {
+      root.current.position.y = 0.66 + Math.sin(t * 1.7) * 0.02;
+      root.current.rotation.z = Math.sin(t * 1.1) * 0.02;
     }
     if (head.current) {
-      head.current.rotation.z = Math.sin(time * 0.7) * 0.045
-      head.current.rotation.x = Math.sin(time * 0.9) * 0.025
+      head.current.rotation.z = Math.sin(t * 0.7) * 0.05;
+      head.current.rotation.x =
+        (isAnalyzing ? 0.1 : 0) + Math.sin(t * 0.9) * 0.02;
     }
-    if (tail.current) {
-      tail.current.rotation.y = Math.sin(time * 2) * 0.35
-    }
-    const eyeShift = THREE.MathUtils.clamp(state.camera.position.x * 0.016, -0.035, 0.035)
-    if (leftEye.current) leftEye.current.position.x = -0.105 + eyeShift
-    if (rightEye.current) rightEye.current.position.x = 0.105 + eyeShift
-  })
+    const shift = THREE.MathUtils.clamp(
+      s.camera.position.x * 0.02,
+      -0.03,
+      0.03,
+    );
+    if (lEye.current) lEye.current.position.x = -0.1 + shift;
+    if (rEye.current) rEye.current.position.x = 0.1 + shift;
+  });
+
+  const G = "#93cc74";
+  const GD = "#6fb257";
+  const BELLY = "#d0e9b1";
+  const HORN = "#c7cf63";
+  const RED = "#e2473c";
 
   return (
-    <ClickableGroup onClick={() => setView('dragon')}>
-      <group ref={group} position={[0, 0.86, -0.48]}>
-        <mesh castShadow position={[0, -0.18, 0]}>
-          <sphereGeometry args={[0.28, 32, 20]} />
-          <meshStandardMaterial color="#95bfdd" roughness={0.78} />
+    <ClickableGroup onClick={() => setView("register")}>
+      {/* stands behind the counter, facing the room */}
+      <group
+        ref={root}
+        position={[0, 0.66, -0.62]}
+        rotation={[0, Math.PI, 0]}
+        scale={1.05}
+      >
+        {/* body */}
+        <mesh castShadow position={[0, -0.12, 0]} scale={[1, 1.08, 0.92]}>
+          <icosahedronGeometry args={[0.34, 1]} />
+          <meshStandardMaterial color={G} roughness={0.75} flatShading />
         </mesh>
-        <group ref={head} position={[0, 0.2, 0.02]}>
-          <mesh castShadow scale={[1.22, 0.96, 0.94]}>
-            <sphereGeometry args={[0.34, 40, 24]} />
-            <meshStandardMaterial color="#a9cbe7" roughness={0.72} />
+        {/* belly */}
+        <mesh position={[0, -0.14, -0.24]} scale={[0.6, 0.72, 0.4]}>
+          <icosahedronGeometry args={[0.34, 1]} />
+          <meshStandardMaterial color={BELLY} roughness={0.8} flatShading />
+        </mesh>
+        {/* arms */}
+        {[-0.3, 0.3].map((x) => (
+          <mesh
+            key={x}
+            castShadow
+            position={[x, -0.2, -0.14]}
+            scale={[0.11, 0.14, 0.11]}
+          >
+            <icosahedronGeometry args={[1, 0]} />
+            <meshStandardMaterial color={G} roughness={0.75} flatShading />
           </mesh>
-          <mesh castShadow position={[0, -0.05, 0.28]} scale={[0.95, 0.56, 0.38]}>
-            <sphereGeometry args={[0.22, 32, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+        ))}
+        {/* wings (flat tri membranes) */}
+        {[-1, 1].map((s) => (
+          <mesh
+            key={s}
+            castShadow
+            position={[s * 0.32, 0.0, 0.12]}
+            rotation={[0.2, s * 0.6, s * -0.5]}
+            scale={[0.24, 0.28, 0.02]}
+          >
+            <coneGeometry args={[1, 1.2, 3]} />
+            <meshStandardMaterial
+              color={GD}
+              roughness={0.8}
+              flatShading
+              side={THREE.DoubleSide}
+            />
           </mesh>
-          <mesh ref={leftEye} position={[-0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
-            <sphereGeometry args={[0.035, 16, 12]} />
-            <meshStandardMaterial color="#26323a" roughness={0.4} />
+        ))}
+
+        {/* head */}
+        <group ref={head} position={[0, 0.22, -0.02]}>
+          <mesh castShadow scale={[1.15, 0.98, 1]}>
+            <icosahedronGeometry args={[0.32, 1]} />
+            <meshStandardMaterial color={G} roughness={0.72} flatShading />
           </mesh>
-          <mesh ref={rightEye} position={[0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
-            <sphereGeometry args={[0.035, 16, 12]} />
-            <meshStandardMaterial color="#26323a" roughness={0.4} />
+          {/* snout */}
+          <mesh
+            castShadow
+            position={[0, -0.06, -0.26]}
+            scale={[0.85, 0.6, 0.5]}
+          >
+            <icosahedronGeometry args={[0.2, 0]} />
+            <meshStandardMaterial color={BELLY} roughness={0.78} flatShading />
           </mesh>
-          <mesh position={[-0.105, 0.055, 0.315]} rotation={[0, 0, 0]}>
-            <torusGeometry args={[0.07, 0.007, 10, 36]} />
-            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          {/* mouth */}
+          <mesh position={[0, -0.12, -0.38]}>
+            <boxGeometry args={[0.08, 0.012, 0.01]} />
+            <meshStandardMaterial color={GD} />
           </mesh>
-          <mesh position={[0.105, 0.055, 0.315]}>
-            <torusGeometry args={[0.07, 0.007, 10, 36]} />
-            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          {/* cheeks */}
+          {[-0.19, 0.19].map((x) => (
+            <mesh key={x} position={[x, -0.04, -0.2]}>
+              <icosahedronGeometry args={[0.05, 0]} />
+              <meshStandardMaterial
+                color="#f2a9ba"
+                roughness={0.8}
+                flatShading
+              />
+            </mesh>
+          ))}
+          {/* eyes */}
+          <mesh
+            ref={lEye}
+            position={[-0.1, 0.05, -0.29]}
+            scale={[1, blink ? 0.12 : 1, 1]}
+          >
+            <icosahedronGeometry args={[0.045, 0]} />
+            <meshStandardMaterial color="#2a2320" roughness={0.4} flatShading />
           </mesh>
-          <mesh position={[0, 0.055, 0.318]}>
-            <boxGeometry args={[0.07, 0.01, 0.01]} />
-            <meshStandardMaterial color="#5b4b6a" />
+          <mesh
+            ref={rEye}
+            position={[0.1, 0.05, -0.29]}
+            scale={[1, blink ? 0.12 : 1, 1]}
+          >
+            <icosahedronGeometry args={[0.045, 0]} />
+            <meshStandardMaterial color="#2a2320" roughness={0.4} flatShading />
           </mesh>
-          <mesh position={[-0.16, 0.27, 0.03]} rotation={[0, 0, 0.35]}>
-            <coneGeometry args={[0.055, 0.16, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          <mesh position={[-0.085, 0.07, -0.315]}>
+            <icosahedronGeometry args={[0.013, 0]} />
+            <meshBasicMaterial color="#ffffff" />
           </mesh>
-          <mesh position={[0.16, 0.27, 0.03]} rotation={[0, 0, -0.35]}>
-            <coneGeometry args={[0.055, 0.16, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          <mesh position={[0.115, 0.07, -0.315]}>
+            <icosahedronGeometry args={[0.013, 0]} />
+            <meshBasicMaterial color="#ffffff" />
+          </mesh>
+          {/* round red glasses */}
+          {[-0.1, 0.1].map((x) => (
+            <mesh
+              key={x}
+              position={[x, 0.05, -0.3]}
+              rotation={[Math.PI / 2, 0, 0]}
+            >
+              <torusGeometry args={[0.085, 0.012, 6, 20]} />
+              <meshStandardMaterial color={RED} roughness={0.4} flatShading />
+            </mesh>
+          ))}
+          <mesh position={[0, 0.05, -0.3]}>
+            <boxGeometry args={[0.04, 0.014, 0.01]} />
+            <meshStandardMaterial color={RED} flatShading />
+          </mesh>
+          {/* horns */}
+          <mesh castShadow position={[0, 0.34, 0]} rotation={[0.1, 0, 0]}>
+            <coneGeometry args={[0.055, 0.2, 5]} />
+            <meshStandardMaterial color={HORN} roughness={0.7} flatShading />
+          </mesh>
+          {[-0.18, 0.18].map((x) => (
+            <mesh
+              key={x}
+              castShadow
+              position={[x, 0.27, 0]}
+              rotation={[0.1, 0, x < 0 ? 0.45 : -0.45]}
+            >
+              <coneGeometry args={[0.045, 0.16, 5]} />
+              <meshStandardMaterial color={HORN} roughness={0.7} flatShading />
+            </mesh>
+          ))}
+          {/* ear frills */}
+          {[-1, 1].map((s) => (
+            <mesh
+              key={s}
+              castShadow
+              position={[s * 0.31, 0.05, 0.02]}
+              rotation={[0, 0, s * -0.9]}
+            >
+              <coneGeometry args={[0.05, 0.16, 4]} />
+              <meshStandardMaterial color={BELLY} roughness={0.8} flatShading />
+            </mesh>
+          ))}
+        </group>
+
+        {/* bowtie */}
+        <group position={[0, 0.02, -0.28]}>
+          {[-1, 1].map((s) => (
+            <mesh
+              key={s}
+              castShadow
+              position={[s * 0.06, 0, 0]}
+              rotation={[0, 0, s * 0.4 + Math.PI / 2]}
+            >
+              <coneGeometry args={[0.05, 0.1, 3]} />
+              <meshStandardMaterial color={RED} roughness={0.5} flatShading />
+            </mesh>
+          ))}
+          <mesh castShadow>
+            <boxGeometry args={[0.04, 0.05, 0.05]} />
+            <meshStandardMaterial color="#c53a31" roughness={0.5} flatShading />
           </mesh>
         </group>
-        <mesh castShadow position={[-0.31, -0.12, -0.04]} rotation={[0.15, 0.4, 0.7]} scale={[0.08, 0.2, 0.03]}>
-          <sphereGeometry args={[1, 16, 12]} />
-          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
-        </mesh>
-        <mesh castShadow position={[0.31, -0.12, -0.04]} rotation={[0.15, -0.4, -0.7]} scale={[0.08, 0.2, 0.03]}>
-          <sphereGeometry args={[1, 16, 12]} />
-          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
-        </mesh>
-        <group ref={tail} position={[0, -0.2, -0.28]}>
-          <mesh castShadow rotation={[1.1, 0, 0]} scale={[0.07, 0.07, 0.36]}>
-            <sphereGeometry args={[1, 16, 12]} />
-            <meshStandardMaterial color="#8fb8d8" roughness={0.8} />
-          </mesh>
-        </group>
+
+        {isAnalyzing && (
+          <Sparkles
+            count={12}
+            scale={[0.6, 0.6, 0.6]}
+            size={1.6}
+            speed={0.4}
+            color="#ffe4a8"
+            position={[0, 0.35, 0]}
+          />
+        )}
       </group>
     </ClickableGroup>
-  )
+  );
 }
 
-function ArchiveShelves({
-  products,
-  selectedProductId,
-  setSelectedProductId,
-  setView,
-}: {
-  products: Product[]
-  selectedProductId: string | null
-  setSelectedProductId: (id: string | null) => void
-  setView: (view: CameraView) => void
-}) {
-  const selectedProduct = products.find((product) => product.id === selectedProductId)
+/* ------------------------------ friends ------------------------------ */
 
+function Cat({ position }: { position: [number, number, number] }) {
+  const tail = useRef<THREE.Group>(null);
+  useFrame((s) => {
+    if (tail.current)
+      tail.current.rotation.z =
+        0.3 + Math.sin(s.clock.elapsedTime * 1.6) * 0.25;
+  });
+  const F = "#c6b4e3";
   return (
-    <group position={[0, 0, 0]}>
-      <ClickableGroup onClick={() => setView('waiting')}>
-        <ShelfSection label="Waiting for a Sale" labelIcon="hourglass" position={[-1.9, 1.43, -2.72]} color="#aebed0" />
-      </ClickableGroup>
-      <ClickableGroup onClick={() => setView('worth')}>
-        <ShelfSection label="Worth It" labelIcon="flower" position={[1.9, 1.43, -2.72]} color="#c7d3aa" />
-      </ClickableGroup>
-      <ShelfSection label="Purchased" labelIcon="star" position={[-0.65, 0.34, -2.72]} color="#e1b391" />
-      <ShelfSection label="Recently Added" labelIcon="box" position={[0.65, 0.34, -2.72]} color="#cdb6d9" />
-
-      {products.map((product) => (
-        <ProductCard
-          key={product.id}
-          product={product}
-          selected={product.id === selectedProductId}
-          onSelect={() => {
-            setSelectedProductId(product.id)
-            setView('product')
-          }}
-        />
+    <group position={position} scale={0.6}>
+      <mesh castShadow position={[0, -0.05, 0]} scale={[0.9, 1, 0.8]}>
+        <icosahedronGeometry args={[0.26, 0]} />
+        <meshStandardMaterial color={F} roughness={0.85} flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.28, 0.04]}>
+        <icosahedronGeometry args={[0.22, 0]} />
+        <meshStandardMaterial color={F} roughness={0.85} flatShading />
+      </mesh>
+      {[-0.12, 0.12].map((x) => (
+        <mesh
+          key={x}
+          castShadow
+          position={[x, 0.46, 0.02]}
+          rotation={[0, 0, x < 0 ? 0.3 : -0.3]}
+        >
+          <coneGeometry args={[0.07, 0.14, 4]} />
+          <meshStandardMaterial color={F} roughness={0.85} flatShading />
+        </mesh>
       ))}
-      {selectedProduct && <ProductInfoPanel product={selectedProduct} />}
+      {[-0.08, 0.08].map((x) => (
+        <mesh key={x} position={[x, 0.3, 0.2]}>
+          <icosahedronGeometry args={[0.028, 0]} />
+          <meshStandardMaterial color="#3a3040" flatShading />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.25, 0.22]}>
+        <icosahedronGeometry args={[0.02, 0]} />
+        <meshStandardMaterial color="#f2a9ba" flatShading />
+      </mesh>
+      <group ref={tail} position={[0.18, -0.1, -0.14]}>
+        <mesh castShadow rotation={[0.6, 0, 0]} scale={[0.05, 0.05, 0.3]}>
+          <icosahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={F} roughness={0.85} flatShading />
+        </mesh>
+      </group>
     </group>
-  )
+  );
 }
 
-function ShelfSection({
-  color,
-  label,
-  labelIcon,
-  position,
-}: {
-  color: string
-  label: string
-  labelIcon: string
-  position: [number, number, number]
-}) {
+function Dog({ position }: { position: [number, number, number] }) {
+  const B = "#e6c68b";
+  const BD = "#d9b06a";
   return (
-    <group position={position}>
-      <RoundedBox castShadow receiveShadow args={[1.82, 1.1, 0.32]} radius={0.045} smoothness={6}>
-        <meshStandardMaterial color="#c89d69" roughness={0.76} />
-      </RoundedBox>
-      <mesh position={[0, 0, 0.18]}>
-        <boxGeometry args={[1.62, 0.86, 0.04]} />
-        <meshStandardMaterial color="#f5e4ca" emissive="#f2c98f" emissiveIntensity={0.1} roughness={0.9} />
+    <group position={position} scale={0.72}>
+      {/* haunches / body */}
+      <mesh castShadow position={[0, 0.24, 0]} scale={[0.9, 0.9, 1.05]}>
+        <icosahedronGeometry args={[0.3, 0]} />
+        <meshStandardMaterial color={B} roughness={0.85} flatShading />
       </mesh>
-      <mesh position={[0, 0.51, 0.22]}>
-        <boxGeometry args={[1.1, 0.18, 0.035]} />
-        <meshStandardMaterial color={color} roughness={0.86} />
+      {/* chest */}
+      <mesh castShadow position={[0, 0.18, 0.26]} scale={[0.7, 0.9, 0.7]}>
+        <icosahedronGeometry args={[0.24, 0]} />
+        <meshStandardMaterial color={B} roughness={0.85} flatShading />
       </mesh>
-      <Text position={[0, 0.515, 0.245]} fontSize={0.052} color="#5f4b38" anchorX="center">
-        {labelIcon} {label}
-      </Text>
-      <mesh position={[-0.46, 0.02, 0.22]}>
-        <boxGeometry args={[0.03, 0.74, 0.035]} />
-        <meshStandardMaterial color="#d8b27a" roughness={0.74} />
+      {/* head */}
+      <mesh castShadow position={[0, 0.56, 0.28]}>
+        <icosahedronGeometry args={[0.22, 0]} />
+        <meshStandardMaterial color={B} roughness={0.85} flatShading />
       </mesh>
-      <mesh position={[0.46, 0.02, 0.22]}>
-        <boxGeometry args={[0.03, 0.74, 0.035]} />
-        <meshStandardMaterial color="#d8b27a" roughness={0.74} />
+      {/* muzzle */}
+      <mesh castShadow position={[0, 0.5, 0.46]} scale={[0.55, 0.5, 0.6]}>
+        <icosahedronGeometry args={[0.16, 0]} />
+        <meshStandardMaterial color="#f2e2c4" roughness={0.85} flatShading />
       </mesh>
-    </group>
-  )
-}
-
-function ProductCard({
-  onSelect,
-  product,
-  selected,
-}: {
-  onSelect: () => void
-  product: Product
-  selected: boolean
-}) {
-  const [hovered, setHovered] = useState(false)
-  const group = useRef<THREE.Group>(null)
-  const texture = useProductTexture(product)
-
-  useCursor(hovered)
-
-  useFrame((state) => {
-    if (!group.current) return
-    const time = state.clock.elapsedTime
-    const targetScale = selected ? 1.22 : hovered ? 1.1 : 1
-
-    group.current.position.y = product.position[1] + Math.sin(time * 1.4 + product.position[0]) * 0.025 + (selected ? 0.18 : 0)
-    group.current.position.z = product.position[2] + (selected ? 0.25 : 0)
-    group.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.12)
-  })
-
-  return (
-    <Float speed={1.4} floatIntensity={0.04} rotationIntensity={0.03}>
-      <group
-        ref={group}
-        position={product.position}
-        onClick={(event) => {
-          event.stopPropagation()
-          onSelect()
-        }}
-        onPointerOut={() => setHovered(false)}
-        onPointerOver={(event) => {
-          event.stopPropagation()
-          setHovered(true)
-        }}
+      <mesh position={[0, 0.5, 0.6]}>
+        <icosahedronGeometry args={[0.03, 0]} />
+        <meshStandardMaterial color="#3a2f28" flatShading />
+      </mesh>
+      {/* ears (floppy) */}
+      {[-1, 1].map((s) => (
+        <mesh
+          key={s}
+          castShadow
+          position={[s * 0.18, 0.6, 0.24]}
+          rotation={[0.2, 0, s * 0.3]}
+          scale={[0.5, 1, 0.4]}
+        >
+          <coneGeometry args={[0.1, 0.24, 4]} />
+          <meshStandardMaterial color={BD} roughness={0.85} flatShading />
+        </mesh>
+      ))}
+      {[-0.08, 0.08].map((x) => (
+        <mesh key={x} position={[x, 0.6, 0.44]}>
+          <icosahedronGeometry args={[0.026, 0]} />
+          <meshStandardMaterial color="#3a2f28" flatShading />
+        </mesh>
+      ))}
+      {/* front legs */}
+      {[-0.12, 0.12].map((x) => (
+        <mesh
+          key={x}
+          castShadow
+          position={[x, 0.08, 0.4]}
+          scale={[0.09, 0.16, 0.09]}
+        >
+          <icosahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={B} roughness={0.85} flatShading />
+        </mesh>
+      ))}
+      {/* tail */}
+      <mesh
+        castShadow
+        position={[0, 0.34, -0.28]}
+        rotation={[0.7, 0, 0]}
+        scale={[0.06, 0.06, 0.24]}
       >
-        <mesh castShadow>
-          <boxGeometry args={[0.54, 0.72, 0.035]} />
-          <meshStandardMaterial
-            color="#fff7e7"
-            emissive={selected || hovered ? '#ffdba8' : '#6b4b2f'}
-            emissiveIntensity={selected ? 0.32 : hovered ? 0.18 : 0.03}
-            map={texture}
-            roughness={0.82}
-          />
-        </mesh>
-        <mesh position={[0, -0.45, 0.04]}>
-          <boxGeometry args={[0.64, 0.08, 0.09]} />
-          <meshStandardMaterial color="#b7895a" roughness={0.8} />
-        </mesh>
-        <Text position={[0, -0.325, 0.055]} fontSize={0.042} color="#76553e" maxWidth={0.45} textAlign="center" anchorX="center">
-          {product.price} - {product.badge}
-        </Text>
-        {(selected || product.isNew) && <Sparkles count={18} scale={[0.75, 0.85, 0.35]} size={2} speed={0.35} color="#ffe1a3" />}
-      </group>
-    </Float>
-  )
+        <icosahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial color={BD} roughness={0.85} flatShading />
+      </mesh>
+    </group>
+  );
 }
 
-function ProductInfoPanel({ product }: { product: Product }) {
-  const side = product.position[0] > 1.5 ? -1 : 1
-
+function Bird({ position }: { position: [number, number, number] }) {
+  const g = useRef<THREE.Group>(null);
+  useFrame((s) => {
+    if (g.current)
+      g.current.position.y =
+        position[1] + Math.sin(s.clock.elapsedTime * 3) * 0.015;
+  });
   return (
-    <Float speed={1.2} floatIntensity={0.025} rotationIntensity={0.015}>
-      <group position={[product.position[0] + side * 0.86, product.position[1] + 0.02, product.position[2] + 0.12]}>
-        <RoundedBox castShadow args={[0.96, 1.08, 0.035]} radius={0.045} smoothness={6}>
-          <meshStandardMaterial color="#fff2d7" roughness={0.9} />
-        </RoundedBox>
-        <Text position={[0, 0.42, 0.035]} fontSize={0.064} color="#5b4434" maxWidth={0.78} textAlign="center" anchorX="center">
-          {product.name}
-        </Text>
-        <Text position={[-0.38, 0.23, 0.035]} fontSize={0.044} color="#75614f" anchorX="left">
-          Current: {product.price}{'\n'}
-          Lowest: {product.lowest}{'\n'}
-          Quality: {product.rating}{'\n'}
-          Verdict: {product.verdict}{'\n'}
-          Sale: {product.saleDate}
-        </Text>
-        <TrendGraph values={product.graph} />
-      </group>
-    </Float>
-  )
-}
-
-function TrendGraph({ values }: { values: number[] }) {
-  return (
-    <group position={[-0.3, -0.36, 0.045]}>
-      {values.map((value, index) => (
-        <mesh key={`${value}-${index}`} position={[index * 0.14, value * 0.22, 0]}>
-          <boxGeometry args={[0.055, value * 0.42, 0.025]} />
-          <meshStandardMaterial color={index === values.length - 1 ? '#8aa881' : '#bca0c9'} roughness={0.75} />
+    <group ref={g} position={position} scale={0.5}>
+      <mesh castShadow scale={[0.9, 1, 0.9]}>
+        <icosahedronGeometry args={[0.2, 0]} />
+        <meshStandardMaterial color="#f2d17a" roughness={0.8} flatShading />
+      </mesh>
+      {[-0.06, 0.06].map((x) => (
+        <mesh key={x} position={[x, 0.05, 0.16]}>
+          <icosahedronGeometry args={[0.025, 0]} />
+          <meshStandardMaterial color="#3a3026" flatShading />
         </mesh>
       ))}
-      <Text position={[0.28, -0.07, 0.02]} fontSize={0.035} color="#80644b" anchorX="center">
-        price trend
-      </Text>
+      <mesh position={[0, 0.0, 0.2]} rotation={[Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.03, 0.08, 4]} />
+        <meshStandardMaterial color="#e0a94e" flatShading />
+      </mesh>
+      <mesh castShadow position={[0, 0.2, 0]}>
+        <coneGeometry args={[0.05, 0.09, 4]} />
+        <meshStandardMaterial color="#e6b45c" flatShading />
+      </mesh>
     </group>
-  )
+  );
 }
 
-function useProductTexture(product: Product) {
-  return useMemo(() => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 384
-    canvas.height = 512
-    const context = canvas.getContext('2d')
-
-    if (context) {
-      const gradient = context.createLinearGradient(0, 0, 384, 512)
-      gradient.addColorStop(0, product.colorA)
-      gradient.addColorStop(1, product.colorB)
-      context.fillStyle = '#fff8eb'
-      context.fillRect(0, 0, 384, 512)
-      context.fillStyle = gradient
-      context.roundRect(34, 34, 316, 300, 28)
-      context.fill()
-      context.fillStyle = 'rgba(255,255,255,0.64)'
-      context.beginPath()
-      context.arc(190, 160, 76, 0, Math.PI * 2)
-      context.fill()
-      context.strokeStyle = '#8b6a4d'
-      context.lineWidth = 8
-      context.strokeRect(34, 34, 316, 300)
-      context.fillStyle = '#5e4938'
-      context.font = 'bold 34px serif'
-      context.textAlign = 'center'
-      context.fillText(product.name, 192, 390, 310)
-      context.font = '28px serif'
-      context.fillText(product.price, 192, 438)
-    }
-
-    const texture = new THREE.CanvasTexture(canvas)
-    texture.colorSpace = THREE.SRGBColorSpace
-    texture.anisotropy = 4
-    return texture
-  }, [product])
-}
-
-function Decorations() {
+function CornerPlants() {
+  const spots: [number, number, number][] = [
+    [WALL - 0.5, 0, -WALL + 0.5],
+    [-WALL + 0.5, 0, -WALL + 0.5],
+    [WALL - 0.5, 0, WALL - 0.5],
+    [-WALL + 0.5, 0, WALL - 0.5],
+  ];
   return (
     <group>
-      <GltfTag position={[-3.1, 1.16, -2.74]} rotation={[0, 0, -0.08]} />
-      <Plants />
-      <BooksAndBaskets />
-      <FairyLights />
-      <WallArt />
-      <DeskLamp />
-      <PlushAndCollectibles />
-    </group>
-  )
-}
-
-function GltfTag({
-  position,
-  rotation,
-}: {
-  position: [number, number, number]
-  rotation: [number, number, number]
-}) {
-  const { scene } = useGLTF('/models/handwritten-tag.gltf')
-  const clone = useMemo(() => scene.clone(true), [scene])
-
-  return (
-    <group position={position} rotation={rotation}>
-      <primitive object={clone} scale={[0.34, 0.34, 0.34]} />
-      <RoundedBox castShadow args={[0.76, 0.24, 0.035]} radius={0.035} smoothness={5}>
-        <meshStandardMaterial color="#ead5ae" roughness={0.92} />
-      </RoundedBox>
-      <Text position={[0, 0, 0.028]} fontSize={0.052} color="#72543c" anchorX="center">
-        handwritten picks
-      </Text>
-    </group>
-  )
-}
-
-function Plants() {
-  return (
-    <group>
-      {[
-        [-3.7, 0.12, -2.55],
-        [3.55, 0.12, -2.35],
-        [-3.85, 1.95, -1.35],
-      ].map(([x, y, z], index) => (
-        <group key={`${x}-${z}`} position={[x, y, z]}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.14, 0.18, 0.22, 18]} />
-            <meshStandardMaterial color={index === 1 ? '#d8b2a4' : '#c6b285'} roughness={0.85} />
+      {spots.map(([x, , z], i) => (
+        <group key={i} position={[x, 0, z]}>
+          <mesh castShadow position={[0, 0.16, 0]}>
+            <cylinderGeometry args={[0.16, 0.2, 0.32, 6]} />
+            <meshStandardMaterial
+              color={i % 2 ? "#cf9f9a" : "#b98d67"}
+              roughness={0.9}
+              flatShading
+            />
           </mesh>
-          {Array.from({ length: 7 }, (_, leafIndex) => (
+          {Array.from({ length: 5 }, (_, j) => (
             <mesh
-              key={leafIndex}
+              key={j}
               castShadow
               position={[
-                Math.cos(leafIndex) * 0.09,
-                0.18 + leafIndex * 0.012,
-                Math.sin(leafIndex * 1.7) * 0.08,
+                Math.cos(j * 1.4) * 0.1,
+                0.5 + (j % 2) * 0.14,
+                Math.sin(j * 1.9) * 0.1,
               ]}
-              rotation={[0.5, leafIndex, 0.6]}
-              scale={[0.06, 0.18, 0.025]}
+              rotation={[0.4, j, 0.5]}
             >
-              <sphereGeometry args={[1, 12, 8]} />
-              <meshStandardMaterial color="#78966f" roughness={0.9} />
+              <coneGeometry args={[0.09, 0.4, 4]} />
+              <meshStandardMaterial
+                color={j % 2 ? "#6f9e63" : "#84ab6f"}
+                roughness={0.9}
+                flatShading
+              />
             </mesh>
           ))}
         </group>
       ))}
     </group>
-  )
+  );
 }
 
-function BooksAndBaskets() {
-  return (
-    <group>
-      {Array.from({ length: 9 }, (_, index) => (
-        <mesh key={index} castShadow position={[-3.3 + index * 0.095, 0.73, -2.52]} rotation={[0, 0, (index % 3 - 1) * 0.08]}>
-          <boxGeometry args={[0.07, 0.34 + (index % 4) * 0.025, 0.22]} />
-          <meshStandardMaterial color={['#9db1bd', '#d8aa8a', '#b9c99a'][index % 3]} roughness={0.82} />
-        </mesh>
-      ))}
-      {[-2.9, 2.9].map((x) => (
-        <group key={x} position={[x, 0.18, 0.02]}>
-          <RoundedBox castShadow args={[0.62, 0.3, 0.42]} radius={0.06} smoothness={6}>
-            <meshStandardMaterial color="#b98958" roughness={0.96} wireframe={false} />
-          </RoundedBox>
-          <mesh position={[0, 0.08, 0.23]}>
-            <boxGeometry args={[0.58, 0.035, 0.025]} />
-            <meshStandardMaterial color="#e4c393" roughness={0.9} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  )
-}
-
-function FairyLights() {
-  return (
-    <group position={[0, 3.15, -2.88]}>
-      {Array.from({ length: 18 }, (_, index) => {
-        const x = -3.4 + index * 0.4
-        const y = Math.sin(index * 0.8) * 0.09
-
-        return (
-          <group key={index} position={[x, y, 0]}>
-            <mesh>
-              <sphereGeometry args={[0.035, 12, 8]} />
-              <meshStandardMaterial color="#ffe4aa" emissive="#ffc86f" emissiveIntensity={0.75 + Math.sin(index) * 0.15} />
-            </mesh>
-            <pointLight color="#ffd99f" intensity={0.18} distance={0.9} />
-          </group>
-        )
-      })}
-      <mesh position={[0, 0.05, 0]}>
-        <boxGeometry args={[7, 0.015, 0.015]} />
-        <meshStandardMaterial color="#87694c" roughness={0.9} />
-      </mesh>
-    </group>
-  )
-}
-
-function WallArt() {
-  const frames: Array<[number, number, number, string]> = [
-    [-3.85, 2.35, -0.8, '#c7b1d7'],
-    [3.85, 2.05, -0.95, '#a8c4ad'],
-  ]
-
-  return (
-    <group>
-      {frames.map(([x, y, z, color]) => (
-        <group key={`${x}-${z}`} position={[x, y, z]} rotation={[0, x < 0 ? Math.PI / 2 : -Math.PI / 2, 0]}>
-          <mesh castShadow>
-            <boxGeometry args={[0.72, 0.5, 0.045]} />
-            <meshStandardMaterial color="#a77a52" roughness={0.68} />
-          </mesh>
-          <mesh position={[0, 0, 0.03]}>
-            <boxGeometry args={[0.58, 0.36, 0.035]} />
-            <meshStandardMaterial color={color} roughness={0.82} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  )
-}
-
-function DeskLamp() {
-  return (
-    <group position={[1.12, 0.9, 0.65]}>
-      <mesh castShadow position={[0, -0.22, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.035, 32]} />
-        <meshStandardMaterial color="#b9824d" metalness={0.2} roughness={0.42} />
-      </mesh>
-      <mesh castShadow position={[0, 0.02, 0]} rotation={[0, 0, -0.45]}>
-        <cylinderGeometry args={[0.025, 0.025, 0.48, 16]} />
-        <meshStandardMaterial color="#b9824d" metalness={0.18} roughness={0.45} />
-      </mesh>
-      <mesh castShadow position={[0.18, 0.28, 0]} rotation={[0, 0, -0.32]}>
-        <coneGeometry args={[0.18, 0.22, 28]} />
-        <meshStandardMaterial color="#f1d8a8" emissive="#ffcd7f" emissiveIntensity={0.28} roughness={0.65} />
-      </mesh>
-      <pointLight color="#ffc878" intensity={1.1} distance={2} position={[0.18, 0.18, 0.08]} />
-    </group>
-  )
-}
-
-function PlushAndCollectibles() {
-  return (
-    <group position={[3.28, 0.66, -2.45]}>
-      <mesh castShadow scale={[0.14, 0.19, 0.12]}>
-        <sphereGeometry args={[1, 18, 12]} />
-        <meshStandardMaterial color="#d78d68" roughness={0.9} />
-      </mesh>
-      <mesh castShadow position={[-0.08, 0.16, 0]} rotation={[0, 0, 0.45]}>
-        <coneGeometry args={[0.055, 0.13, 16]} />
-        <meshStandardMaterial color="#d78d68" roughness={0.9} />
-      </mesh>
-      <mesh castShadow position={[0.08, 0.16, 0]} rotation={[0, 0, -0.45]}>
-        <coneGeometry args={[0.055, 0.13, 16]} />
-        <meshStandardMaterial color="#d78d68" roughness={0.9} />
-      </mesh>
-      <mesh position={[-0.04, 0.03, 0.1]}>
-        <sphereGeometry args={[0.018, 10, 8]} />
-        <meshStandardMaterial color="#493b32" />
-      </mesh>
-      <mesh position={[0.04, 0.03, 0.1]}>
-        <sphereGeometry args={[0.018, 10, 8]} />
-        <meshStandardMaterial color="#493b32" />
-      </mesh>
-    </group>
-  )
-}
-
-function FloatingDust() {
-  return <Sparkles count={70} scale={[7, 3, 5]} size={1.25} speed={0.16} color="#ffe4b7" position={[0, 1.7, 0]} />
-}
+/* --------------------------- interaction helper --------------------------- */
 
 function ClickableGroup({
   children,
   onClick,
 }: {
-  children: ReactNode
-  onClick: () => void
+  children: ReactNode;
+  onClick: () => void;
 }) {
-  const [hovered, setHovered] = useState(false)
-  useCursor(hovered)
-
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered);
   return (
     <group
-      onClick={(event) => {
-        event.stopPropagation()
-        onClick()
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHovered(true);
       }}
       onPointerOut={() => setHovered(false)}
-      onPointerOver={(event) => {
-        event.stopPropagation()
-        setHovered(true)
-      }}
     >
       {children}
     </group>
-  )
+  );
 }
 
-useGLTF.preload('/models/handwritten-tag.gltf')
+/* ------------------------------ detail modal ------------------------------ */
 
-export default App
+function DetailModal({
+  product,
+  onClose,
+}: {
+  product: Product;
+  onClose: () => void;
+}) {
+  const meta = SHELF_META[product.shelf];
+  const max = Math.max(...product.graph, 0.001);
+  return (
+    <div className="bc-modal-backdrop" onClick={onClose}>
+      <div
+        className="bc-modal"
+        style={{ ["--accent" as string]: meta.color }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="bc-modal-close" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+        <div className="bc-modal-head">
+          <span
+            className="bc-modal-photo"
+            style={{
+              background: `linear-gradient(135deg, ${product.colorA}, ${product.colorB})`,
+            }}
+          >
+            {emojiFor(product.name)}
+          </span>
+          <div>
+            <div className="bc-modal-name">{product.name}</div>
+            <span className="bc-modal-pill">{product.shelf}</span>
+          </div>
+        </div>
+
+        <div className="bc-modal-stats">
+          <div>
+            <span>Now</span>
+            <b>{product.price}</b>
+          </div>
+          <div>
+            <span>Lowest</span>
+            <b>{product.lowest}</b>
+          </div>
+          <div>
+            <span>Quality</span>
+            <b>{product.rating}</b>
+          </div>
+          <div>
+            <span>Sale</span>
+            <b>{product.saleDate}</b>
+          </div>
+        </div>
+
+        <div className="bc-verdict">
+          “{product.verdict}” — {meta.blurb}
+        </div>
+
+        <div className="bc-trend">
+          <div className="bc-trend-label">Price trend</div>
+          <div className="bc-trend-bars">
+            {product.graph.map((v, i) => (
+              <span
+                key={i}
+                className={i === product.graph.length - 1 ? "now" : ""}
+                style={{ height: `${(v / max) * 100}%` }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ overlay css ------------------------------ */
+
+function StyleTag() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap');
+
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; margin: 0; }
+      body { font-family: 'Nunito', system-ui, sans-serif; }
+
+      .bc-shell { position: fixed; inset: 0; overflow: hidden; background: #efe6d2; }
+      .bc-shell canvas { touch-action: none; }
+
+      /* topbar */
+      .bc-topbar { position: absolute; top: 16px; left: 18px; right: 18px; display: flex;
+        align-items: flex-start; justify-content: space-between; gap: 14px; pointer-events: none; }
+      .bc-brand { display: flex; align-items: center; gap: 11px; background: rgba(255,253,247,0.9);
+        padding: 9px 15px; border-radius: 18px; box-shadow: 0 8px 22px rgba(120,90,60,0.16);
+        backdrop-filter: blur(6px); pointer-events: auto; }
+      .bc-logo { font-size: 24px; }
+      .bc-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 21px; color: #574234; line-height: 1; }
+      .bc-tag { font-size: 12px; color: #7c6350; margin-top: 2px; }
+
+      .bc-legend { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; pointer-events: auto; }
+      .bc-legend-item { display: inline-flex; align-items: center; gap: 7px; border: none; cursor: pointer;
+        background: rgba(255,253,247,0.9); color: #574234; font-family: 'Nunito', sans-serif;
+        font-weight: 700; font-size: 12.5px; padding: 8px 12px; border-radius: 14px;
+        box-shadow: 0 6px 16px rgba(120,90,60,0.14); transition: transform .12s; }
+      .bc-legend-item:hover { transform: translateY(-2px); }
+      .bc-legend-item i { width: 11px; height: 11px; border-radius: 50%; }
+      .bc-legend-item b { background: #f0e7d8; border-radius: 8px; padding: 1px 7px; font-size: 11px; }
+
+      /* speech bubble */
+      .bc-speech { position: absolute; left: 18px; bottom: 88px; max-width: 320px; background: #fffdf7;
+        color: #574234; font-weight: 700; font-size: 14px; padding: 13px 17px;
+        border-radius: 20px 20px 20px 6px; box-shadow: 0 10px 26px rgba(120,90,60,0.2); border: 2px solid #c6b4e3; }
+      .bc-speech-tail { position: absolute; left: 20px; bottom: -9px; width: 15px; height: 15px; background: #fffdf7;
+        border-right: 2px solid #c6b4e3; border-bottom: 2px solid #c6b4e3; transform: rotate(45deg); }
+
+      /* actions + hint */
+      .bc-actions { position: absolute; left: 18px; bottom: 22px; display: flex; gap: 9px; }
+      .bc-btn { font-family: 'Baloo 2', cursive; font-weight: 700; font-size: 15px; border: none; border-radius: 15px;
+        padding: 11px 20px; cursor: pointer; color: #574234; background: #fffdf7;
+        box-shadow: 0 6px 15px rgba(120,90,60,0.18); transition: transform .12s, box-shadow .12s; }
+      .bc-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(120,90,60,0.24); }
+      .bc-btn-primary { background: #a98fd0; color: #fffdf7; }
+      .bc-hint { position: absolute; right: 18px; bottom: 24px; font-size: 12px; font-weight: 700; color: #7c6350;
+        background: rgba(255,253,247,0.7); padding: 7px 13px; border-radius: 13px; }
+
+      /* shelf label (in-world, via Html) */
+      .bc-shelf-label { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 15px; white-space: nowrap;
+        color: #574234; background: #fffdf7; padding: 6px 13px; border-radius: 13px; border-bottom: 3px solid var(--accent);
+        box-shadow: 0 6px 16px rgba(120,90,60,0.2); display: inline-flex; align-items: center; gap: 8px; user-select: none; }
+      .bc-shelf-label span { background: var(--accent); color: #fff; font-size: 11px; border-radius: 8px; padding: 1px 7px; }
+
+      /* 2D product card (in-world, via Html) */
+      .bc-card { width: 132px; border: none; text-align: left; cursor: pointer; font-family: 'Nunito', sans-serif;
+        background: #fffdf7; border-radius: 15px; padding: 9px; display: flex; flex-direction: column; gap: 6px;
+        box-shadow: 0 8px 20px rgba(120,90,60,0.22); border-top: 4px solid var(--accent);
+        transition: transform .14s, box-shadow .14s; user-select: none; }
+      .bc-card:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 14px 26px rgba(120,90,60,0.28); }
+      .bc-card.is-new { animation: bcpop .5s ease; }
+      @keyframes bcpop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+      .bc-card-photo { height: 74px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+      .bc-card-emoji { font-size: 34px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.15)); }
+      .bc-card-name { font-weight: 800; font-size: 12.5px; color: #574234; line-height: 1.15;
+        overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 29px; }
+      .bc-card-foot { display: flex; align-items: center; justify-content: space-between; }
+      .bc-card-price { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 15px; color: #574234; }
+      .bc-card-pill { background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; border-radius: 8px; padding: 2px 7px; }
+
+      /* CRT readout */
+      .bc-crt { font-family: 'Baloo 2', monospace; font-weight: 700; color: #8ff08a; font-size: 9px; line-height: 1.5;
+        letter-spacing: 0.5px; white-space: nowrap; position: relative; user-select: none; }
+      .bc-crt-grade { position: absolute; right: -6px; top: 4px; font-size: 20px; }
+
+      /* detail modal */
+      .bc-modal-backdrop { position: absolute; inset: 0; background: rgba(60,45,35,0.32); backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; animation: bcfade .2s ease; }
+      @keyframes bcfade { from { opacity: 0; } to { opacity: 1; } }
+      .bc-modal { position: relative; width: min(380px, 92vw); background: #fffdf7; border-radius: 24px; padding: 22px;
+        box-shadow: 0 24px 60px rgba(60,45,35,0.35); border-top: 6px solid var(--accent); animation: bcrise .25s ease; }
+      @keyframes bcrise { from { transform: translateY(14px) scale(0.97); opacity: 0; } to { transform: none; opacity: 1; } }
+      .bc-modal-close { position: absolute; top: 14px; right: 14px; border: none; background: #f0e7d8; color: #574234;
+        width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-weight: 800; }
+      .bc-modal-head { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
+      .bc-modal-photo { width: 66px; height: 66px; border-radius: 16px; display: flex; align-items: center;
+        justify-content: center; font-size: 34px; flex: none; }
+      .bc-modal-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 20px; color: #574234; }
+      .bc-modal-pill { display: inline-block; margin-top: 5px; background: var(--accent); color: #fff; font-weight: 800;
+        font-size: 11px; border-radius: 9px; padding: 3px 10px; }
+      .bc-modal-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 14px; }
+      .bc-modal-stats div { background: #f7efe1; border-radius: 12px; padding: 9px 12px; }
+      .bc-modal-stats span { display: block; font-size: 11px; color: #9a8570; font-weight: 700; }
+      .bc-modal-stats b { font-family: 'Baloo 2', cursive; font-size: 17px; color: #574234; }
+      .bc-verdict { font-size: 13px; font-weight: 700; color: #6b5443; background: #f7efe1; border-radius: 12px;
+        padding: 10px 13px; margin-bottom: 14px; }
+      .bc-trend-label { font-size: 11px; font-weight: 800; color: #9a8570; margin-bottom: 6px; }
+      .bc-trend-bars { display: flex; align-items: flex-end; gap: 6px; height: 68px; }
+      .bc-trend-bars span { flex: 1; background: #d8c6e6; border-radius: 6px 6px 3px 3px; min-height: 6px; }
+      .bc-trend-bars span.now { background: var(--accent); }
+
+      @media (max-width: 720px) {
+        .bc-legend { display: none; }
+        .bc-hint { display: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bc-card, .bc-btn, .bc-legend-item { transition: none; }
+        .bc-card.is-new, .bc-modal, .bc-modal-backdrop { animation: none; }
+      }
+    `}</style>
+  );
+}
+
+export default App;
