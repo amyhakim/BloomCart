@@ -292,7 +292,7 @@ function Scene({
         setSelectedProductId={setSelectedProductId}
         setView={setView}
       />
-      <RegisterArea isAnalyzing={isAnalyzing} setView={setView} />
+      <IsabelleDesk isAnalyzing={isAnalyzing} setView={setView} />
       <Dragon isAnalyzing={isAnalyzing} setView={setView} />
       <FloatingDust />
       <ContactShadows opacity={0.28} scale={9} blur={2.6} far={4.5} position={[0, 0.012, 0]} />
@@ -486,7 +486,7 @@ function Rug() {
   )
 }
 
-function RegisterArea({
+function IsabelleDesk({
   isAnalyzing,
   setView,
 }: {
@@ -495,29 +495,167 @@ function RegisterArea({
 }) {
   return (
     <ClickableGroup onClick={() => setView('register')}>
-      <group position={[0, 0.48, 0.72]}>
-        <RoundedBox castShadow receiveShadow args={[2.55, 0.82, 1.1]} radius={0.08} smoothness={8}>
-          <meshStandardMaterial color="#b98959" roughness={0.72} />
-        </RoundedBox>
-        <mesh position={[0, 0.47, 0.04]}>
-          <boxGeometry args={[2.74, 0.08, 1.22]} />
-          <meshStandardMaterial color="#d7b17d" roughness={0.62} />
-        </mesh>
-        <group position={[-0.55, 0.66, -0.05]}>
-          <mesh castShadow rotation={[-0.35, 0, 0]}>
-            <boxGeometry args={[0.55, 0.38, 0.08]} />
-            <meshStandardMaterial color="#6f7f76" roughness={0.5} />
-          </mesh>
-          <Text position={[0, 0.04, 0.055]} rotation={[-0.35, 0, 0]} fontSize={0.045} color="#fff4d4" anchorX="center">
-            AI cart notes
-          </Text>
-        </group>
+      <group position={[0, 0, 0.72]}>
+        <DeskCabinet />
+        <DeskTop />
+        <Monitor />
+        <PapersOnDesk />
+        <Mug />
+        <PenHolder />
+        <Telephone />
+        <RedBox />
+        <NamePlate />
         <Scanner isAnalyzing={isAnalyzing} />
         <Keyboard isAnalyzing={isAnalyzing} />
-        <DeskObjects />
         {isAnalyzing && <ScanProduct />}
       </group>
     </ClickableGroup>
+  )
+}
+
+function DeskCabinet() {
+  const drawerCols = [-0.85, -0.28, 0.28, 0.85]
+
+  return (
+    <group position={[0, 0.42, -0.15]}>
+      <RoundedBox castShadow receiveShadow args={[2.6, 0.84, 0.9]} radius={0.03} smoothness={4}>
+        <meshStandardMaterial color="#7a4a30" roughness={0.55} />
+      </RoundedBox>
+
+      {[0.18, -0.18].map((rowY) =>
+        drawerCols.map((x) => (
+          <group key={`${x}-${rowY}`} position={[x, rowY, 0.455]}>
+            <mesh castShadow>
+              <boxGeometry args={[0.48, 0.3, 0.02]} />
+              <meshStandardMaterial color="#8a5636" roughness={0.5} />
+            </mesh>
+            <mesh position={[0, 0, 0.015]}>
+              <boxGeometry args={[0.16, 0.03, 0.02]} />
+              <meshStandardMaterial color="#d9b45a" metalness={0.6} roughness={0.3} />
+            </mesh>
+          </group>
+        )),
+      )}
+    </group>
+  )
+}
+
+function DeskTop() {
+  return (
+    <mesh castShadow receiveShadow position={[0, 0.855, -0.15]}>
+      <boxGeometry args={[2.78, 0.06, 1.02]} />
+      <meshStandardMaterial color="#96603c" roughness={0.42} />
+    </mesh>
+  )
+}
+
+function Monitor() {
+  return (
+    <group position={[-0.95, 0.88, 0.1]}>
+      <mesh castShadow>
+        <boxGeometry args={[0.06, 0.42, 0.32]} />
+        <meshStandardMaterial color="#8a5636" roughness={0.6} />
+      </mesh>
+      <mesh castShadow position={[0.16, 0.02, 0]}>
+        <boxGeometry args={[0.34, 0.34, 0.28]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.35} />
+      </mesh>
+      <mesh position={[0.335, 0.02, 0]}>
+        <boxGeometry args={[0.02, 0.26, 0.2]} />
+        <meshStandardMaterial color="#101010" emissive="#1c2b33" emissiveIntensity={0.4} />
+      </mesh>
+    </group>
+  )
+}
+
+function PapersOnDesk() {
+  return (
+    <group position={[-0.15, 0.892, 0.15]} rotation={[-Math.PI / 2, 0, 0.06]}>
+      <mesh position={[0.02, -0.01, 0]}>
+        <planeGeometry args={[0.32, 0.42]} />
+        <meshStandardMaterial color="#f7f2e4" roughness={0.9} />
+      </mesh>
+      <mesh position={[-0.06, 0.03, 0.001]} rotation={[0, 0, -0.1]}>
+        <planeGeometry args={[0.3, 0.4]} />
+        <meshStandardMaterial color="#fdfaf0" roughness={0.9} />
+      </mesh>
+    </group>
+  )
+}
+
+function Mug() {
+  return (
+    <group position={[0.35, 0.9, 0.18]}>
+      <mesh castShadow>
+        <cylinderGeometry args={[0.07, 0.06, 0.11, 24]} />
+        <meshStandardMaterial color="#fffaf0" roughness={0.5} />
+      </mesh>
+      <mesh position={[0, 0.05, 0]}>
+        <cylinderGeometry args={[0.055, 0.055, 0.005, 24]} />
+        <meshStandardMaterial color="#5a3824" roughness={0.6} />
+      </mesh>
+      <mesh position={[0.08, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <torusGeometry args={[0.035, 0.008, 8, 20]} />
+        <meshStandardMaterial color="#fffaf0" roughness={0.5} />
+      </mesh>
+    </group>
+  )
+}
+
+function PenHolder() {
+  return (
+    <group position={[-0.02, 0.9, 0.32]}>
+      <mesh castShadow>
+        <cylinderGeometry args={[0.045, 0.045, 0.1, 16]} />
+        <meshStandardMaterial color="#2c2c2c" roughness={0.5} />
+      </mesh>
+      {[-0.02, 0, 0.02].map((x, i) => (
+        <mesh key={i} position={[x, 0.09, 0]} rotation={[0, 0, x * 3]}>
+          <cylinderGeometry args={[0.005, 0.005, 0.14, 8]} />
+          <meshStandardMaterial color={['#2c2c2c', '#c0392b', '#2255aa'][i]} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function Telephone() {
+  return (
+    <group position={[0.75, 0.895, 0.12]}>
+      <RoundedBox castShadow args={[0.28, 0.05, 0.22]} radius={0.02} smoothness={4}>
+        <meshStandardMaterial color="#3a5fa0" roughness={0.4} />
+      </RoundedBox>
+      <mesh position={[0, 0.05, -0.02]} rotation={[0.3, 0, 0]}>
+        <boxGeometry args={[0.24, 0.05, 0.08]} />
+        <meshStandardMaterial color="#3a5fa0" roughness={0.4} />
+      </mesh>
+      <mesh position={[0.06, 0.03, 0.06]}>
+        <cylinderGeometry args={[0.05, 0.05, 0.01, 20]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.5} />
+      </mesh>
+    </group>
+  )
+}
+
+function RedBox() {
+  return (
+    <RoundedBox castShadow args={[0.22, 0.1, 0.16]} radius={0.015} smoothness={4} position={[1.05, 0.92, 0.05]}>
+      <meshStandardMaterial color="#a4342a" roughness={0.4} />
+    </RoundedBox>
+  )
+}
+
+function NamePlate() {
+  return (
+    <group position={[0.15, 0.885, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh>
+        <planeGeometry args={[0.34, 0.09]} />
+        <meshStandardMaterial color="#3f4a3f" roughness={0.6} />
+      </mesh>
+      <Text position={[0, 0, 0.001]} fontSize={0.045} color="#e8e2c8" anchorX="center" anchorY="middle">
+        Isabelle
+      </Text>
+    </group>
   )
 }
 
@@ -531,7 +669,7 @@ function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
   })
 
   return (
-    <group position={[0.35, 0.67, -0.07]}>
+    <group position={[0.48, 0.92, -0.08]}>
       <RoundedBox castShadow args={[0.46, 0.13, 0.38]} radius={0.04} smoothness={8}>
         <meshStandardMaterial color="#a77c52" roughness={0.78} />
       </RoundedBox>
@@ -552,7 +690,7 @@ function Scanner({ isAnalyzing }: { isAnalyzing: boolean }) {
 
 function Keyboard({ isAnalyzing }: { isAnalyzing: boolean }) {
   return (
-    <group position={[0, 0.66, 0.32]} rotation={[-0.1, 0, 0]}>
+    <group position={[0.16, 0.91, 0.28]} rotation={[-0.1, 0, 0]}>
       {Array.from({ length: 16 }, (_, index) => {
         const x = (index % 8) * 0.07 - 0.245
         const z = Math.floor(index / 8) * 0.07 - 0.035
@@ -590,51 +728,17 @@ function KeyboardKey({
   )
 }
 
-function DeskObjects() {
-  return (
-    <group>
-      <group position={[0.92, 0.69, 0.2]}>
-        <mesh castShadow>
-          <cylinderGeometry args={[0.1, 0.1, 0.17, 28]} />
-          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
-        </mesh>
-        <mesh position={[0.115, 0.015, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.055, 0.011, 8, 24]} />
-          <meshStandardMaterial color="#f3e4ce" roughness={0.7} />
-        </mesh>
-      </group>
-      <mesh castShadow position={[-0.95, 0.69, 0.28]}>
-        <cylinderGeometry args={[0.09, 0.11, 0.22, 24]} />
-        <meshStandardMaterial color="#b7c9a5" roughness={0.8} />
-      </mesh>
-      <mesh castShadow position={[-0.95, 0.85, 0.28]}>
-        <sphereGeometry args={[0.12, 16, 12]} />
-        <meshStandardMaterial color="#7ea07a" roughness={0.9} />
-      </mesh>
-      <mesh castShadow position={[0.74, 0.68, -0.35]}>
-        <cylinderGeometry args={[0.12, 0.16, 0.14, 32]} />
-        <meshStandardMaterial color="#cfa45f" metalness={0.15} roughness={0.45} />
-      </mesh>
-      <Text position={[0.72, 0.8, -0.35]} fontSize={0.055} color="#765539" anchorX="center">ding</Text>
-      <mesh castShadow position={[-0.25, 0.69, -0.4]} rotation={[0.06, 0.12, 0]}>
-        <boxGeometry args={[0.42, 0.035, 0.28]} />
-        <meshStandardMaterial color="#ead9bd" roughness={0.92} />
-      </mesh>
-    </group>
-  )
-}
-
 function ScanProduct() {
   const ref = useRef<THREE.Group>(null)
 
   useFrame((state) => {
     if (!ref.current) return
-    ref.current.position.y = 1.06 + Math.sin(state.clock.elapsedTime * 2.2) * 0.04
+    ref.current.position.y = 1.32 + Math.sin(state.clock.elapsedTime * 2.2) * 0.04
     ref.current.rotation.y += 0.015
   })
 
   return (
-    <group ref={ref} position={[0.35, 1.06, -0.07]}>
+    <group ref={ref} position={[0.48, 1.32, -0.08]}>
       <mesh castShadow>
         <sphereGeometry args={[0.16, 28, 18]} />
         <meshStandardMaterial color="#9cbad6" roughness={0.55} />
