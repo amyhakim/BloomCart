@@ -301,15 +301,60 @@ function Scene({
 }
 
 function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null; view: CameraView }) {
-  const { camera, mouse } = useThree()
+  const { camera, gl, mouse } = useThree()
   const basePosition = useRef(new THREE.Vector3(0, 2.35, 7))
-  const baseLookAt = useRef(new THREE.Vector3(0, 1.2, -0.6))
-  const lookAt = useRef(new THREE.Vector3(0, 1.2, -0.6))
+  const targetYaw = useRef(0)
+  const targetPitch = useRef(0)
+  const smoothYaw = useRef(0)
+  const smoothPitch = useRef(0)
   const smoothMouse = useRef(new THREE.Vector2())
   const desiredPosition = useRef(new THREE.Vector3())
   const desiredLookAt = useRef(new THREE.Vector3())
   const parallaxOffset = useRef(new THREE.Vector3())
-  const lookOffset = useRef(new THREE.Vector3())
+  const lookDirection = useRef(new THREE.Vector3())
+  const dragState = useRef({ active: false, moved: 0 })
+
+  useEffect(() => {
+    const canvas = gl.domElement
+    const sensitivity = 0.0032
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      dragState.current.active = true
+      dragState.current.moved = 0
+      canvas.setPointerCapture(event.pointerId)
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragState.current.active) return
+      dragState.current.moved += Math.abs(event.movementX) + Math.abs(event.movementY)
+      targetYaw.current -= event.movementX * sensitivity
+      targetPitch.current = THREE.MathUtils.clamp(
+        targetPitch.current - event.movementY * sensitivity,
+        -Math.PI / 2.7,
+        Math.PI / 2.7,
+      )
+    }
+
+    const stopDragging = (event: PointerEvent) => {
+      dragState.current.active = false
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId)
+      }
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown)
+    canvas.addEventListener('pointermove', handlePointerMove)
+    canvas.addEventListener('pointerup', stopDragging)
+    canvas.addEventListener('pointercancel', stopDragging)
+
+    return () => {
+      canvas.removeEventListener('pointerdown', handlePointerDown)
+      canvas.removeEventListener('pointermove', handlePointerMove)
+      canvas.removeEventListener('pointerup', stopDragging)
+      canvas.removeEventListener('pointercancel', stopDragging)
+    }
+  }, [gl])
 
   useEffect(() => {
     const target =
@@ -323,6 +368,7 @@ function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null;
             lookAt: new THREE.Vector3(...selectedProduct.position),
           }
         : cameraViews[view === 'product' ? 'default' : view]
+    const facing = getCameraAngles(target.position, target.lookAt)
 
     gsap.to(basePosition.current, {
       x: target.position.x,
@@ -331,31 +377,49 @@ function CameraRig({ selectedProduct, view }: { selectedProduct: Product | null;
       duration: 1.9,
       ease: 'power3.inOut',
     })
-    gsap.to(baseLookAt.current, {
-      x: target.lookAt.x,
-      y: target.lookAt.y,
-      z: target.lookAt.z,
+    gsap.to(targetYaw, {
+      current: facing.yaw,
       duration: 1.9,
       ease: 'power3.inOut',
     })
-  }, [camera, selectedProduct, view])
+    gsap.to(targetPitch, {
+      current: facing.pitch,
+      duration: 1.9,
+      ease: 'power3.inOut',
+    })
+  }, [selectedProduct, view])
 
   useFrame((_, delta) => {
     const mouseBlend = 1 - Math.exp(-10 * delta)
     const cameraBlend = 1 - Math.exp(-7.5 * delta)
+    const rotationBlend = 1 - Math.exp(-12 * delta)
 
     smoothMouse.current.lerp(mouse, mouseBlend)
-    parallaxOffset.current.set(smoothMouse.current.x * 0.16, smoothMouse.current.y * 0.1, 0)
-    lookOffset.current.set(smoothMouse.current.x * 0.1, smoothMouse.current.y * 0.055, 0)
+    smoothYaw.current = THREE.MathUtils.lerp(smoothYaw.current, targetYaw.current, rotationBlend)
+    smoothPitch.current = THREE.MathUtils.lerp(smoothPitch.current, targetPitch.current, rotationBlend)
+    parallaxOffset.current.set(smoothMouse.current.x * 0.035, smoothMouse.current.y * 0.022, 0)
     desiredPosition.current.copy(basePosition.current).add(parallaxOffset.current)
-    desiredLookAt.current.copy(baseLookAt.current).add(lookOffset.current)
+    lookDirection.current.set(
+      Math.sin(smoothYaw.current) * Math.cos(smoothPitch.current),
+      Math.sin(smoothPitch.current),
+      -Math.cos(smoothYaw.current) * Math.cos(smoothPitch.current),
+    )
+    desiredLookAt.current.copy(desiredPosition.current).add(lookDirection.current)
 
     camera.position.lerp(desiredPosition.current, cameraBlend)
-    lookAt.current.lerp(desiredLookAt.current, cameraBlend)
-    camera.lookAt(lookAt.current)
+    camera.lookAt(desiredLookAt.current)
   })
 
   return null
+}
+
+function getCameraAngles(position: THREE.Vector3, lookAt: THREE.Vector3) {
+  const direction = lookAt.clone().sub(position).normalize()
+
+  return {
+    yaw: Math.atan2(direction.x, -direction.z),
+    pitch: Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)),
+  }
 }
 
 function LoadingRoom() {
