@@ -1,7 +1,7 @@
 .crosshair-cursor {
-  --crosshair-size: 34px;
-  --crosshair-color: rgba(91, 68, 52, 0.88);
-  --crosshair-glow: rgba(255, 228, 177, 0.78);
+  --crosshair-size: 32px;
+  --crosshair-color: rgba(255, 255, 255, 0.96);
+  --crosshair-glow: rgba(65, 45, 28, 0.3);
 
   position: fixed;
   top: 0;
@@ -23,7 +23,7 @@
 }
 
 .crosshair-cursor[data-pressed='true'] {
-  filter: drop-shadow(0 1px 5px rgba(255, 216, 151, 0.92));
+  filter: drop-shadow(0 1px 5px rgba(65, 45, 28, 0.42));
 }
 
 .crosshair-cursor__mark {
@@ -36,52 +36,22 @@
   transform: translate(-50%, -50%);
 }
 
-.crosshair-cursor__ring,
-.crosshair-cursor__line,
-.crosshair-cursor__dot {
+.crosshair-cursor__ring {
   position: absolute;
   display: block;
 }
 
 .crosshair-cursor__ring {
-  inset: 8px;
-  border: 1px solid var(--crosshair-color);
+  inset: 0;
+  border: 2px solid var(--crosshair-color);
   border-radius: 50%;
-  background: rgba(255, 248, 235, 0.18);
+  background: transparent;
   transform: scale(1);
   transition: transform 180ms ease;
 }
 
 .crosshair-cursor[data-pressed='true'] .crosshair-cursor__ring {
   transform: scale(0.72);
-}
-
-.crosshair-cursor__line {
-  top: 50%;
-  left: 50%;
-  background: var(--crosshair-color);
-}
-
-.crosshair-cursor__line--horizontal {
-  width: 100%;
-  height: 1px;
-  transform: translate(-50%, -50%);
-}
-
-.crosshair-cursor__line--vertical {
-  width: 1px;
-  height: 100%;
-  transform: translate(-50%, -50%);
-}
-
-.crosshair-cursor__dot {
-  top: 50%;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--crosshair-color);
-  transform: translate(-50%, -50%);
 }
 
 @media (pointer: coarse) {
