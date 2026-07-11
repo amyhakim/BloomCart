@@ -1,10 +1,5 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import {
-  ContactShadows,
-  Html,
-  Sparkles,
-  useCursor,
-} from "@react-three/drei";
+import { ContactShadows, Html, Sparkles, useCursor } from "@react-three/drei";
 import gsap from "gsap";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -186,7 +181,9 @@ function getStableHash(value: string) {
 }
 
 async function getDatabaseProducts() {
-  const response = await fetch(`${API_BASE_URL}/products?limit=${MAX_RENDERED_PRODUCTS}`);
+  const response = await fetch(
+    `${API_BASE_URL}/products?limit=${MAX_RENDERED_PRODUCTS}`,
+  );
 
   if (!response.ok) {
     throw new Error(`Product API returned ${response.status}`);
@@ -201,7 +198,12 @@ function formatProductPrice(product: DatabaseProduct) {
     return "Unknown";
   }
 
-  const currencyPrefix = product.currency === "USD" ? "$" : product.currency ? `${product.currency} ` : "";
+  const currencyPrefix =
+    product.currency === "USD"
+      ? "$"
+      : product.currency
+        ? `${product.currency} `
+        : "";
   return `${currencyPrefix}${product.price.toFixed(2)}`;
 }
 
@@ -210,7 +212,10 @@ function formatCapturedDate(value: string | null) {
     return "Captured";
   }
 
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+  }).format(new Date(value));
 }
 
 function normalizeShelf(value: string | null): Shelf {
@@ -226,11 +231,18 @@ function normalizeShelf(value: string | null): Shelf {
   return "Recently Added";
 }
 
-function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Product[] {
+function databaseProductsToProducts(
+  databaseProducts: DatabaseProduct[],
+): Product[] {
   return databaseProducts.slice(0, MAX_RENDERED_PRODUCTS).map((item, index) => {
     const price = formatProductPrice(item);
-    const lowest = item.lowest_price === null ? price : formatProductPrice({ ...item, price: item.lowest_price });
-    const hash = getStableHash(`${item.source_site}|${item.id}|${item.source_product_id ?? ""}`);
+    const lowest =
+      item.lowest_price === null
+        ? price
+        : formatProductPrice({ ...item, price: item.lowest_price });
+    const hash = getStableHash(
+      `${item.source_site}|${item.id}|${item.source_product_id ?? ""}`,
+    );
     const palette = productPalettes[index % productPalettes.length];
 
     return {
@@ -242,7 +254,9 @@ function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Produc
       rating: item.rating || "Analyzing",
       verdict: item.verdict || "Recently captured",
       saleDate: formatCapturedDate(item.captured_at),
-      badge: item.badge || (item.quantity && item.quantity > 1 ? `Qty ${item.quantity}` : "New"),
+      badge:
+        item.badge ||
+        (item.quantity && item.quantity > 1 ? `Qty ${item.quantity}` : "New"),
       shelf: normalizeShelf(item.shelf),
       colorA: palette[0],
       colorB: palette[1],
@@ -385,7 +399,10 @@ function App() {
 
   const checkProductPrice = useCallback(async (product: Product) => {
     if (!product.databaseId) {
-      console.warn("BloomCart price check skipped: product is not from the database", product);
+      console.warn(
+        "BloomCart price check skipped: product is not from the database",
+        product,
+      );
       return;
     }
 
@@ -394,37 +411,48 @@ function App() {
       return;
     }
 
-    setNotification(`Opening ${product.name} in a background tab for price check...`);
+    setNotification(
+      `Opening ${product.name} in a background tab for price check...`,
+    );
 
     window.chrome.runtime.sendMessage(
       BLOOMCART_EXTENSION_ID,
       { type: "BLOOMCART_CHECK_PRODUCT_PRICE", productId: product.databaseId },
       (response) => {
         const runtimeError = window.chrome?.runtime?.lastError?.message;
-        console.log(runtimeError)
+        console.log(runtimeError);
 
         if (runtimeError) {
-          console.error("BloomCart extension price check failed:", runtimeError);
+          console.error(
+            "BloomCart extension price check failed:",
+            runtimeError,
+          );
           setNotification(`Price check failed: ${runtimeError}`);
         }
 
-        console.log("fehdkjhdjkdhsjksdahksdbdsckjcgxajgsadkdsakdasghajdjsa")
+        console.log("fehdkjhdjkdhsjksdahksdbdsckjcgxajgsadkdsakdasghajdjsa");
         console.log("BloomCart extension price check:", response);
 
         if (!response?.ok) {
-          console.log(`Price check failed: ${response?.error ?? "unknown error"}`);
+          console.log(
+            `Price check failed: ${response?.error ?? "unknown error"}`,
+          );
           return;
         }
 
         const backend = response.result?.backend;
 
         if (backend?.priceDropped) {
-          setNotification(`${product.name} dropped to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`);
+          setNotification(
+            `${product.name} dropped to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`,
+          );
           return;
         }
 
         if (backend?.priceChanged) {
-          setNotification(`${product.name} changed to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`);
+          setNotification(
+            `${product.name} changed to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`,
+          );
           return;
         }
 
@@ -594,7 +622,10 @@ function App() {
       {!products.length && (
         <div className="bc-empty-state">
           <strong>No saved products yet</strong>
-          <span>Open a supported cart page and let the BloomCart extension capture it.</span>
+          <span>
+            Open a supported cart page and let the BloomCart extension capture
+            it.
+          </span>
         </div>
       )}
 
@@ -980,7 +1011,11 @@ function CardWall({
                       <ProductImage
                         alt={p.name}
                         className="bc-card-image"
-                        fallback={<span className="bc-card-emoji">{emojiFor(p.name)}</span>}
+                        fallback={
+                          <span className="bc-card-emoji">
+                            {emojiFor(p.name)}
+                          </span>
+                        }
                         src={p.imageUrl}
                       />
                     </span>
@@ -1631,7 +1666,10 @@ function DetailModal({
           “{product.verdict}” — {meta.blurb}
         </div>
 
-        <button className="bc-check-price" onClick={() => onCheckPrice(product)}>
+        <button
+          className="bc-check-price"
+          onClick={() => onCheckPrice(product)}
+        >
           Check price with browser
         </button>
 
@@ -1653,126 +1691,139 @@ function DetailModal({
 }
 
 /* ------------------------------ overlay css ------------------------------ */
+/* ------------------------------ overlay css ------------------------------ */
 
 function StyleTag() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@700;800;900&display=swap');
 
       * { box-sizing: border-box; }
-      html, body, #root { height: 100%; margin: 0; }
-      body { font-family: 'Nunito', system-ui, sans-serif; }
+      html, body, #root { height: 100%; margin: 0; background: #efe6d2; }
+      body { font-family: 'Nunito', system-ui, sans-serif; color: #5c4331; }
 
       .bc-shell { position: fixed; inset: 0; overflow: hidden; background: #efe6d2; }
       .bc-shell canvas { touch-action: none; }
 
-      /* topbar */
-      .bc-topbar { position: absolute; top: 16px; left: 18px; right: 18px; display: flex;
+      /* Animal Crossing Custom Cursor on Hoverable Elements */
+      .bc-legend-item, .bc-btn, .bc-card, .bc-modal-close, .bc-check-price {
+        cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M10,22 L6,24 L4,22 L4,18 L8,14 L12,14 L12,10 L10,6 L12,4 L16,4 L18,8 L18,14 L24,14 L26,16 L26,18 L24,20 L18,20 L18,22 L14,22 L10,22 Z" fill="white" stroke="%235c4331" stroke-width="2.5" stroke-linejoin="round"/></svg>'), auto !important;
+      }
+
+      /* Topbar & Branding */
+      .bc-topbar { position: absolute; top: 18px; left: 18px; right: 18px; display: flex;
         align-items: flex-start; justify-content: space-between; gap: 14px; pointer-events: none; }
-      .bc-brand { display: flex; align-items: center; gap: 11px; background: rgba(255,253,247,0.9);
-        padding: 9px 15px; border-radius: 18px; box-shadow: 0 8px 22px rgba(120,90,60,0.16);
-        backdrop-filter: blur(6px); pointer-events: auto; }
-      .bc-logo { font-size: 24px; }
-      .bc-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 21px; color: #574234; line-height: 1; }
-      .bc-tag { font-size: 12px; color: #7c6350; margin-top: 2px; }
+      .bc-brand { display: flex; align-items: center; gap: 11px; background: #fffff5;
+        padding: 10px 20px; border-radius: 24px; box-shadow: 0 8px 0px rgba(92, 67, 49, 0.1);
+        border: 4px solid #f6f0db; pointer-events: auto; }
+      .bc-logo { font-size: 26px; }
+      .bc-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 24px; color: #e9732f; line-height: 1; }
+      .bc-tag { font-size: 13px; color: #8b7355; margin-top: 4px; font-weight: 700; }
 
-      .bc-legend { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; pointer-events: auto; }
-      .bc-legend-item { display: inline-flex; align-items: center; gap: 7px; border: none; cursor: pointer;
-        background: rgba(255,253,247,0.9); color: #574234; font-family: 'Nunito', sans-serif;
-        font-weight: 700; font-size: 12.5px; padding: 8px 12px; border-radius: 14px;
-        box-shadow: 0 6px 16px rgba(120,90,60,0.14); transition: transform .12s; }
-      .bc-legend-item:hover { transform: translateY(-2px); }
-      .bc-legend-item i { width: 11px; height: 11px; border-radius: 50%; }
-      .bc-legend-item b { background: #f0e7d8; border-radius: 8px; padding: 1px 7px; font-size: 11px; }
+      /* Shelf Legend Tabs */
+      .bc-legend { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; pointer-events: auto; }
+      .bc-legend-item { display: inline-flex; align-items: center; gap: 8px; border: none;
+        background: #fffff5; color: #5c4331; font-family: 'Nunito', sans-serif;
+        font-weight: 800; font-size: 13px; padding: 10px 16px; border-radius: 20px;
+        box-shadow: 0 4px 0px rgba(92, 67, 49, 0.15); border: 3px solid #eaddca; transition: transform .1s; }
+      .bc-legend-item:hover { transform: scale(1.05); background: #fffdf0; }
+      .bc-legend-item i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.1); }
+      .bc-legend-item b { background: #ebdcb9; border-radius: 10px; padding: 2px 8px; font-size: 12px; color: #5c4331; }
 
-      /* speech bubble */
-      .bc-speech { position: absolute; left: 18px; bottom: 88px; max-width: 320px; background: #fffdf7;
-        color: #574234; font-weight: 700; font-size: 14px; padding: 13px 17px;
-        border-radius: 20px 20px 20px 6px; box-shadow: 0 10px 26px rgba(120,90,60,0.2); border: 2px solid #c6b4e3; }
-      .bc-speech-tail { position: absolute; left: 20px; bottom: -9px; width: 15px; height: 15px; background: #fffdf7;
-        border-right: 2px solid #c6b4e3; border-bottom: 2px solid #c6b4e3; transform: rotate(45deg); }
+      /* Cozy Speech Bubble */
+      .bc-speech { position: absolute; left: 18px; bottom: 94px; max-width: 340px; background: #fffff5;
+        color: #5c4331; font-weight: 800; font-size: 15px; padding: 16px 22px;
+        border-radius: 32px 32px 32px 10px; box-shadow: 0 8px 0px rgba(92, 67, 49, 0.08); border: 4px solid #eaddca; }
+      .bc-speech-tail { position: absolute; left: 24px; bottom: -12px; width: 18px; height: 18px; background: #fffff5;
+        border-right: 4px solid #eaddca; border-bottom: 4px solid #eaddca; transform: rotate(45deg); }
 
-      /* actions + hint */
-      .bc-actions { position: absolute; left: 18px; bottom: 22px; display: flex; gap: 9px; }
-      .bc-btn { font-family: 'Baloo 2', cursive; font-weight: 700; font-size: 15px; border: none; border-radius: 15px;
-        padding: 11px 20px; cursor: pointer; color: #574234; background: #fffdf7;
-        box-shadow: 0 6px 15px rgba(120,90,60,0.18); transition: transform .12s, box-shadow .12s; }
-      .bc-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(120,90,60,0.24); }
-      .bc-btn-primary { background: #a98fd0; color: #fffdf7; }
-      .bc-hint { position: absolute; right: 18px; bottom: 24px; font-size: 12px; font-weight: 700; color: #7c6350;
-        background: rgba(255,253,247,0.7); padding: 7px 13px; border-radius: 13px; }
-      .bc-empty-state { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, 86vw);
-        display: grid; gap: 6px; text-align: center; color: #574234; background: rgba(255,253,247,0.88);
-        border: 2px solid #c6b4e3; border-radius: 22px; padding: 20px; box-shadow: 0 18px 44px rgba(120,90,60,0.22); }
-      .bc-empty-state strong { font-family: 'Baloo 2', cursive; font-size: 22px; }
-      .bc-empty-state span { font-size: 13px; font-weight: 700; color: #7c6350; }
+      /* Action Buttons */
+      .bc-actions { position: absolute; left: 18px; bottom: 22px; display: flex; gap: 10px; }
+      .bc-btn { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 16px; border: 3px solid #eaddca; border-radius: 24px;
+        padding: 10px 22px; color: #5c4331; background: #fffff5;
+        box-shadow: 0 5px 0px rgba(92, 67, 49, 0.15); transition: transform .1s; }
+      .bc-btn:hover { transform: translateY(-2px); box-shadow: 0 7px 0px rgba(92, 67, 49, 0.15); }
+      
+      /* Orange Stripe Accent Button */
+      .bc-btn-primary { 
+        background: repeating-linear-gradient(-45deg, #ff9e42, #ff9e42 12px, #ffb066 12px, #ffb066 24px);
+        color: #ffffff; border: 3px solid #e07b22; text-shadow: 1px 1px 0px rgba(92, 67, 49, 0.4);
+      }
+      .bc-btn-primary:hover {
+        background: repeating-linear-gradient(-45deg, #ffa852, #ffa852 12px, #ffba75 12px, #ffba75 24px);
+      }
 
-      /* shelf label (in-world, via Html) */
-      .bc-shelf-label { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 15px; white-space: nowrap;
-        color: #574234; background: #fffdf7; padding: 6px 13px; border-radius: 13px; border-bottom: 3px solid var(--accent);
-        box-shadow: 0 6px 16px rgba(120,90,60,0.2); display: inline-flex; align-items: center; gap: 8px; user-select: none; }
-      .bc-shelf-label span { background: var(--accent); color: #fff; font-size: 11px; border-radius: 8px; padding: 1px 7px; }
+      .bc-hint { position: absolute; right: 18px; bottom: 24px; font-size: 13px; font-weight: 800; color: #8b7355;
+        background: #fffff5; padding: 8px 16px; border-radius: 18px; border: 3px solid #f6f0db; }
 
-      /* 2D product card (in-world, via Html) */
-      .bc-card { width: 132px; border: none; text-align: left; cursor: pointer; font-family: 'Nunito', sans-serif;
-        background: #fffdf7; border-radius: 15px; padding: 9px; display: flex; flex-direction: column; gap: 6px;
-        box-shadow: 0 8px 20px rgba(120,90,60,0.22); border-top: 4px solid var(--accent);
-        transition: transform .14s, box-shadow .14s; user-select: none; }
-      .bc-card:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 14px 26px rgba(120,90,60,0.28); }
-      .bc-card.is-new { animation: bcpop .5s ease; }
-      @keyframes bcpop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-      .bc-card-photo { height: 74px; border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      /* In-world labels */
+      .bc-shelf-label { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 16px; white-space: nowrap;
+        color: #5c4331; background: #fffff5; padding: 8px 16px; border-radius: 20px; border: 3px solid #eaddca;
+        box-shadow: 0 6px 0px rgba(0,0,0,0.05); display: inline-flex; align-items: center; gap: 8px; user-select: none; }
+      .bc-shelf-label span { background: var(--accent); color: #fff; font-size: 12px; border-radius: 10px; padding: 2px 8px; }
+
+      /* In-world Cards */
+      .bc-card { width: 140px; border: 4px solid #eaddca; text-align: left; font-family: 'Nunito', sans-serif;
+        background: #fffff5; border-radius: 24px; padding: 10px; display: flex; flex-direction: column; gap: 6px;
+        box-shadow: 0 8px 0px rgba(92, 67, 49, 0.08); transition: transform .14s; user-select: none; }
+      .bc-card:hover { transform: translateY(-4px) scale(1.03); border-color: #ffb066; }
+      .bc-card-photo { height: 80px; border-radius: 16px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 2px solid rgba(0,0,0,0.04); }
       .bc-card-image { width: 100%; height: 100%; object-fit: contain; display: block; padding: 6px; }
-      .bc-card-emoji { font-size: 34px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.15)); }
-      .bc-card-name { font-weight: 800; font-size: 12.5px; color: #574234; line-height: 1.15;
-        overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 29px; }
-      .bc-card-foot { display: flex; align-items: center; justify-content: space-between; }
-      .bc-card-price { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 15px; color: #574234; }
-      .bc-card-pill { background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; border-radius: 8px; padding: 2px 7px; }
+      .bc-card-emoji { font-size: 38px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.1)); }
+      .bc-card-name { font-weight: 800; font-size: 13px; color: #5c4331; line-height: 1.2;
+        overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 32px; }
+      .bc-card-foot { display: flex; align-items: center; justify-content: space-between; border-top: 2px dotted #ebdcb9; padding-top: 4px; margin-top: 2px; }
+      .bc-card-price { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 16px; color: #e9732f; }
+      .bc-card-pill { background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; border-radius: 10px; padding: 2px 8px; }
 
-      /* CRT readout */
-      .bc-crt { font-family: 'Baloo 2', monospace; font-weight: 700; color: #8ff08a; font-size: 9px; line-height: 1.5;
-        letter-spacing: 0.5px; white-space: nowrap; position: relative; user-select: none; }
-      .bc-crt-grade { position: absolute; right: -6px; top: 4px; font-size: 20px; }
-
-      /* detail modal */
-      .bc-modal-backdrop { position: absolute; inset: 0; background: rgba(60,45,35,0.32); backdrop-filter: blur(3px);
-        display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; animation: bcfade .2s ease; }
-      @keyframes bcfade { from { opacity: 0; } to { opacity: 1; } }
-      .bc-modal { position: relative; width: min(380px, 92vw); background: #fffdf7; border-radius: 24px; padding: 22px;
-        box-shadow: 0 24px 60px rgba(60,45,35,0.35); border-top: 6px solid var(--accent); animation: bcrise .25s ease; }
-      @keyframes bcrise { from { transform: translateY(14px) scale(0.97); opacity: 0; } to { transform: none; opacity: 1; } }
-      .bc-modal-close { position: absolute; top: 14px; right: 14px; border: none; background: #f0e7d8; color: #574234;
-        width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-weight: 800; }
-      .bc-modal-head { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
-      .bc-modal-photo { width: 66px; height: 66px; border-radius: 16px; display: flex; align-items: center;
-        justify-content: center; font-size: 34px; flex: none; overflow: hidden; }
+      /* Detail Modal Overlay */
+      .bc-modal-backdrop { position: absolute; inset: 0; background: rgba(92, 67, 49, 0.25); backdrop-filter: blur(2px);
+        display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+      
+      /* Main Animal Crossing White/Cream Speech Leaf Panel */
+      .bc-modal { position: relative; width: min(440px, 92vw); background: #fffff5; border-radius: 48px; padding: 28px;
+        box-shadow: 0 16px 0px rgba(92, 67, 49, 0.15); border: 6px solid #eaddca; }
+      .bc-modal-close { position: absolute; top: 16px; right: 16px; border: 3px solid #ebdcb9; background: #fffff5; color: #5c4331;
+        width: 34px; height: 34px; border-radius: 50%; font-weight: 900; font-size: 14px; box-shadow: 0 3px 0px rgba(0,0,0,0.05); }
+      .bc-modal-close:hover { background: #ffb066; color: white; border-color: #e07b22; }
+      
+      /* Orange and White/Yellow Diagonal Striped Header Frame for Selected items */
+      .bc-modal-head { 
+        display: flex; gap: 16px; align-items: center; margin-bottom: 20px; 
+        background: repeating-linear-gradient(-45deg, #ffbc42, #ffbc42 12px, #ffcc66 12px, #ffcc66 24px);
+        padding: 14px; border-radius: 28px; border: 4px solid #e07b22;
+      }
+      .bc-modal-photo { width: 72px; height: 72px; border-radius: 20px; display: flex; align-items: center;
+        justify-content: center; font-size: 38px; flex: none; overflow: hidden; background: #fffff5 !important; border: 3px solid #eaddca; }
       .bc-modal-image { width: 100%; height: 100%; object-fit: contain; display: block; padding: 6px; }
-      .bc-modal-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 20px; color: #574234; }
-      .bc-modal-pill { display: inline-block; margin-top: 5px; background: var(--accent); color: #fff; font-weight: 800;
-        font-size: 11px; border-radius: 9px; padding: 3px 10px; }
-      .bc-modal-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 14px; }
-      .bc-modal-stats div { background: #f7efe1; border-radius: 12px; padding: 9px 12px; }
-      .bc-modal-stats span { display: block; font-size: 11px; color: #9a8570; font-weight: 700; }
-      .bc-modal-stats b { font-family: 'Baloo 2', cursive; font-size: 17px; color: #574234; }
-      .bc-verdict { font-size: 13px; font-weight: 700; color: #6b5443; background: #f7efe1; border-radius: 12px;
-        padding: 10px 13px; margin-bottom: 14px; }
-      .bc-check-price { width: 100%; border: none; border-radius: 13px; margin: 0 0 14px; padding: 10px 13px;
-        cursor: pointer; color: #fffdf7; background: var(--accent); font-family: 'Baloo 2', cursive;
-        font-size: 15px; font-weight: 800; box-shadow: 0 6px 15px rgba(120,90,60,0.18); }
-      .bc-check-price:hover { filter: brightness(1.04); transform: translateY(-1px); }
-      .bc-trend-label { font-size: 11px; font-weight: 800; color: #9a8570; margin-bottom: 6px; }
-      .bc-trend-bars { display: flex; align-items: flex-end; gap: 6px; height: 68px; }
-      .bc-trend-bars span { flex: 1; background: #d8c6e6; border-radius: 6px 6px 3px 3px; min-height: 6px; }
-      .bc-trend-bars span.now { background: var(--accent); }
+      .bc-modal-name { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 22px; color: #fffff5; text-shadow: 1.5px 1.5px 0px #5c4331; }
+      .bc-modal-pill { display: inline-block; margin-top: 4px; background: #fffff5; color: #5c4331; font-weight: 800;
+        font-size: 12px; border-radius: 12px; padding: 3px 12px; border: 2px solid #eaddca; }
+      
+      /* Dotted List Grids */
+      .bc-modal-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+      .bc-modal-stats div { background: #fbf6ec; border-radius: 20px; padding: 10px 14px; border: 2px dashed #ebdcb9; }
+      .bc-modal-stats span { display: block; font-size: 12px; color: #8b7355; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+      .bc-modal-stats b { font-family: 'Baloo 2', cursive; font-size: 18px; color: #e9732f; }
+      
+      .bc-verdict { font-size: 14px; font-weight: 700; color: #5c4331; background: #fbf6ec; border-radius: 20px;
+        padding: 12px 16px; margin-bottom: 16px; border-left: 5px solid #ffbc42; }
+      
+      /* Big Playful Interaction Button */
+      .bc-check-price { width: 100%; border: 3px solid #e07b22; border-radius: 24px; margin: 0 0 18px; padding: 12px 16px;
+        color: #fffdf7; background: repeating-linear-gradient(-45deg, #ff9e42, #ff9e42 12px, #ffb066 12px, #ffb066 24px); 
+        font-family: 'Baloo 2', cursive; font-size: 17px; font-weight: 800; text-shadow: 1px 1px 0px rgba(92, 67, 49, 0.4);
+        box-shadow: 0 5px 0px rgba(92, 67, 49, 0.15); }
+      .bc-check-price:hover { transform: translateY(-2px); box-shadow: 0 7px 0px rgba(92, 67, 49, 0.15); }
+      
+      .bc-trend-label { font-size: 12px; font-weight: 800; color: #8b7355; margin-bottom: 8px; }
+      .bc-trend-bars { display: flex; align-items: flex-end; gap: 8px; height: 72px; background: #fbf6ec; padding: 10px; border-radius: 20px; border: 2px solid #eaddca; }
+      .bc-trend-bars span { flex: 1; background: #ebdcb9; border-radius: 8px 8px 4px 4px; min-height: 8px; }
+      .bc-trend-bars span.now { background: #e9732f; }
 
       @media (max-width: 720px) {
         .bc-legend { display: none; }
         .bc-hint { display: none; }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .bc-card, .bc-btn, .bc-legend-item { transition: none; }
-        .bc-card.is-new, .bc-modal, .bc-modal-backdrop { animation: none; }
       }
     `}</style>
   );
