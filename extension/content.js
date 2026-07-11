@@ -1,4 +1,25 @@
 (function readBloomCartPage() {
+  const supportedSites = [
+    {
+      name: "Amazon",
+      hostPattern: /(^|\.)amazon\./i,
+      cartContainerSelectors: ["#sc-active-cart", "[data-name='Active Items']", "form#activeCartViewForm"],
+      itemSelectors: [".sc-list-item", "[data-asin][data-itemid]", "[data-asin].sc-list-item"]
+    },
+    {
+      name: "Walmart",
+      hostPattern: /(^|\.)walmart\./i,
+      cartContainerSelectors: ["[data-testid='cart-page']", "[data-automation-id='cart-page']", "main"],
+      itemSelectors: ["[data-testid='cart-item']", "[data-automation-id='cart-item']", "[class*='cart-item' i]"]
+    },
+    {
+      name: "Target",
+      hostPattern: /(^|\.)target\./i,
+      cartContainerSelectors: ["[data-test='cart']", "[data-test='cart-page']", "main"],
+      itemSelectors: ["[data-test='cartItem']", "[data-test='cart-item']", "[class*='CartItem' i]"]
+    }
+  ];
+
   const textSelectors = [
     "h1",
     "h2",
@@ -10,21 +31,12 @@
     "a"
   ];
 
-  const cartItemSelectors = [
-    "[data-testid*='cart' i]",
-    "[data-test*='cart' i]",
-    "[class*='cart-item' i]",
-    "[class*='cartitem' i]",
-    "[class*='basket-item' i]",
-    "[class*='checkout-item' i]",
-    "[class*='line-item' i]",
-    "[class*='product-item' i]",
-    "article",
-    "li"
-  ];
-
   const pricePattern = /(?:[$€£₹]\s?\d[\d,.]*|\d[\d,.]*\s?(?:USD|EUR|GBP|INR))/i;
   const quantityPattern = /(?:qty|quantity)\s*[:x-]?\s*(\d+)/i;
+
+  function getSupportedSite() {
+    return supportedSites.find((site) => site.hostPattern.test(window.location.hostname));
+  }
 
   function normalizeText(value) {
     return (value || "").replace(/\s+/g, " ").trim();
@@ -109,11 +121,14 @@
     return product;
   }
 
-  function collectCandidates() {
+  function collectCandidates(site) {
     const candidates = new Set();
+    const containers = site.cartContainerSelectors.flatMap((selector) => [...document.querySelectorAll(selector)]);
 
-    for (const selector of cartItemSelectors) {
-      document.querySelectorAll(selector).forEach((element) => candidates.add(element));
+    for (const container of containers) {
+      for (const selector of site.itemSelectors) {
+        container.querySelectorAll(selector).forEach((element) => candidates.add(element));
+      }
     }
 
     return [...candidates];
@@ -134,8 +149,16 @@
     });
   }
 
-  const products = dedupeProducts(collectCandidates().map(extractProduct).filter(Boolean));
+  const site = getSupportedSite();
+
+  if (!site) {
+    console.info("BloomCart does not support this shopping site yet:", window.location.hostname);
+    return;
+  }
+
+  const products = dedupeProducts(collectCandidates(site).map(extractProduct).filter(Boolean));
   const cartJson = {
+    supportedSite: site.name,
     sourceUrl: window.location.href,
     extractedAt: new Date().toISOString(),
     productCount: products.length,
