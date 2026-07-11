@@ -7,7 +7,7 @@ async function saveCaptureToBackend(capture) {
   const response = await fetch(BACKEND_CAPTURE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(capture)
+    body: JSON.stringify(capture),
   });
 
   if (!response.ok) {
@@ -55,20 +55,21 @@ function extractPriceFromProductPage(sourceSite) {
       "#priceblock_ourprice",
       "#priceblock_dealprice",
       "#priceblock_saleprice",
-      "[data-a-color='price'] .a-offscreen"
+      "[data-a-color='price'] .a-offscreen",
     ],
     Walmart: [
       "[itemprop='price']",
       "[data-testid='price-wrap']",
-      "[data-automation-id='product-price']"
+      "[data-automation-id='product-price']",
     ],
     Target: [
       "[data-test='product-price']",
       "[data-test='current-price']",
-      "[itemprop='price']"
-    ]
+      "[itemprop='price']",
+    ],
   };
-  const currencyPattern = /(?:[$€£₹]\s?\d[\d,.]*|\d[\d,.]*\s?(?:USD|EUR|GBP|INR))/i;
+  const currencyPattern =
+    /(?:[$€£₹]\s?\d[\d,.]*|\d[\d,.]*\s?(?:USD|EUR|GBP|INR))/i;
 
   function normalizeText(value) {
     return (value || "").replace(/\s+/g, " ").trim();
@@ -95,7 +96,7 @@ function extractPriceFromProductPage(sourceSite) {
     return {
       price: Number.isFinite(amount) ? amount : null,
       currency,
-      rawText
+      rawText,
     };
   }
 
@@ -103,7 +104,9 @@ function extractPriceFromProductPage(sourceSite) {
 
   for (const selector of selectors) {
     const element = document.querySelector(selector);
-    const parsed = parsePrice(element?.textContent || element?.getAttribute("content"));
+    const parsed = parsePrice(
+      element?.textContent || element?.getAttribute("content"),
+    );
 
     if (parsed.price !== null) {
       return { ...parsed, method: `extension-selector:${selector}` };
@@ -114,10 +117,12 @@ function extractPriceFromProductPage(sourceSite) {
     "meta[property='product:price:amount']",
     "meta[property='og:price:amount']",
     "meta[itemprop='price']",
-    "[itemprop='price']"
+    "[itemprop='price']",
   ]) {
     const element = document.querySelector(metaSelector);
-    const parsed = parsePrice(element?.getAttribute("content") || element?.textContent);
+    const parsed = parsePrice(
+      element?.getAttribute("content") || element?.textContent,
+    );
 
     if (parsed.price !== null) {
       return { ...parsed, method: `extension-meta:${metaSelector}` };
@@ -127,26 +132,34 @@ function extractPriceFromProductPage(sourceSite) {
   const parsed = parsePrice(document.body?.innerText);
   return {
     ...parsed,
-    method: parsed.price === null ? "extension-not-found" : "extension-regex"
+    method: parsed.price === null ? "extension-not-found" : "extension-regex",
   };
 }
 
 async function savePriceCheckResult(productId, result) {
-  return fetchBackendJson(`${BACKEND_PRODUCTS_URL}/${productId}/price-check-result`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(result)
-  });
+  return fetchBackendJson(
+    `${BACKEND_PRODUCTS_URL}/${productId}/price-check-result`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result),
+    },
+  );
 }
 
 async function checkProductPriceWithTab(productId) {
-  const product = await fetchBackendJson(`${BACKEND_PRODUCTS_URL}/${productId}`);
+  const product = await fetchBackendJson(
+    `${BACKEND_PRODUCTS_URL}/${productId}`,
+  );
 
   if (!product.source_url) {
     throw new Error("Product does not have a source URL");
   }
 
-  const tab = await chrome.tabs.create({ url: product.source_url, active: false });
+  const tab = await chrome.tabs.create({
+    url: product.source_url,
+    active: false,
+  });
 
   if (!tab.id) {
     throw new Error("Could not create product check tab");
@@ -158,14 +171,14 @@ async function checkProductPriceWithTab(productId) {
     const [injectionResult] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractPriceFromProductPage,
-      args: [product.source_site]
+      args: [product.source_site],
     });
     const extracted = injectionResult?.result || {
       price: null,
       currency: null,
       rawText: null,
       method: "extension-no-result",
-      error: "No extraction result returned"
+      error: "No extraction result returned",
     };
     const backendResult = await savePriceCheckResult(productId, extracted);
 
@@ -174,7 +187,7 @@ async function checkProductPriceWithTab(productId) {
         type: "basic",
         iconUrl: "icon.svg",
         title: "BloomCart price dropped",
-        message: `${backendResult.name} dropped from ${backendResult.oldPrice} to ${backendResult.newPrice}`
+        message: `${backendResult.name} dropped from ${backendResult.oldPrice} to ${backendResult.newPrice}`,
       });
     }
 
@@ -185,10 +198,15 @@ async function checkProductPriceWithTab(productId) {
       currency: null,
       method: "extension-tab",
       rawText: null,
-      error: error.message
+      error: error.message,
     });
 
-    return { product, extracted: null, backend: backendResult, error: error.message };
+    return {
+      product,
+      extracted: null,
+      backend: backendResult,
+      error: error.message,
+    };
   } finally {
     await chrome.tabs.remove(tab.id).catch(() => {});
   }
@@ -202,12 +220,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const capture = {
     ...message.payload,
     tabId: sender.tab?.id ?? null,
-    capturedByExtensionAt: new Date().toISOString()
+    capturedByExtensionAt: new Date().toISOString(),
   };
 
   Promise.all([
     chrome.storage.local.set({ [LATEST_CART_KEY]: capture }),
-    saveCaptureToBackend(capture)
+    saveCaptureToBackend(capture),
   ])
     .then(([, backendResponse]) => {
       sendResponse({ ok: true, backend: backendResponse });
@@ -220,23 +238,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "BLOOMCART_GET_LATEST_CART") {
-    chrome.storage.local.get(LATEST_CART_KEY).then(({ latestCart }) => {
-      sendResponse({ ok: true, cart: latestCart ?? null });
-    });
+chrome.runtime.onMessageExternal.addListener(
+  (message, _sender, sendResponse) => {
+    if (message?.type === "BLOOMCART_GET_LATEST_CART") {
+      chrome.storage.local.get(LATEST_CART_KEY).then(({ latestCart }) => {
+        sendResponse({ ok: true, cart: latestCart ?? null });
+      });
 
-    return true;
-  }
+      return true;
+    }
 
-  if (message?.type === "BLOOMCART_CHECK_PRODUCT_PRICE") {
-    checkProductPriceWithTab(message.productId)
-      .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    if (message?.type === "BLOOMCART_CHECK_PRODUCT_PRICE") {
+      checkProductPriceWithTab(message.productId)
+        .then((result) => sendResponse({ ok: true, result }))
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
 
-    return true;
-  }
+      return true;
+    }
 
-  sendResponse({ ok: false, error: "Unknown BloomCart message type" });
-  return false;
-});
+    sendResponse({ ok: false, error: "Unknown BloomCart message type" });
+    return false;
+  },
+);

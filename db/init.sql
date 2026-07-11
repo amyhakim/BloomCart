@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -8,8 +6,9 @@ CREATE TABLE IF NOT EXISTS products (
   source_url TEXT,
   cart_url TEXT,
 
+  prices INT[],
+
   name TEXT NOT NULL,
-  price NUMERIC(12, 2),
   currency TEXT,
   quantity INTEGER DEFAULT 1,
   image_url TEXT,
@@ -17,13 +16,11 @@ CREATE TABLE IF NOT EXISTS products (
   captured_at TIMESTAMPTZ NOT NULL,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  previous_price NUMERIC(12, 2),
   last_checked_at TIMESTAMPTZ,
   price_changed_at TIMESTAMPTZ,
   check_error TEXT,
   price_check_method TEXT,
 
-  lowest_price NUMERIC(12, 2),
   rating TEXT,
   verdict TEXT,
   badge TEXT,

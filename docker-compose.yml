@@ -4,7 +4,8 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./frontend:/app
+      - ./frontend:/app:Z
+      - frontend_node_modules:/app/node_modules
     depends_on:
       - backend
     restart: unless-stopped
@@ -14,7 +15,7 @@ services:
     ports:
       - "8080:8000"
     volumes:
-      - ./backend:/app
+      - ./backend:/app:Z
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/mydb
     depends_on:
@@ -40,5 +41,21 @@ services:
       timeout: 5s
       retries: 10
 
+  data-sim:
+    image: python:3.12-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/mydb
+    volumes:
+      - ./data_sim:/scripts:Z
+    working_dir: /scripts
+    command: >
+      sh -c "pip install psycopg2-binary &&
+             python simulator.py"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  frontend_node_modules:
