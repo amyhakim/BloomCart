@@ -3,8 +3,25 @@ services:
     build: ./frontend
     ports:
       - "5173:5173"
+    restart: unless-stopped
 
   backend:
     build: ./backend
     ports:
       - "8080:8000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
