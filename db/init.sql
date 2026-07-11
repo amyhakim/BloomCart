@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS products (
   captured_at TIMESTAMPTZ NOT NULL,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+  previous_price NUMERIC(12, 2),
+  last_checked_at TIMESTAMPTZ,
+  price_changed_at TIMESTAMPTZ,
+  check_error TEXT,
+  price_check_method TEXT,
+
   lowest_price NUMERIC(12, 2),
   rating TEXT,
   verdict TEXT,
@@ -34,6 +40,12 @@ ON products (source_site, source_product_id)
 WHERE source_product_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS previous_price NUMERIC(12, 2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_changed_at TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS check_error TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_check_method TEXT;
 
 UPDATE products
 SET image_url = NULL

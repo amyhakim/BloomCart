@@ -32,12 +32,14 @@ type CameraView =
   | "recently";
 
 const API_BASE_URL = "http://localhost:8080";
+const BLOOMCART_EXTENSION_ID = "naflnfaamlcdjakgmhaiggmolhceiaok";
 const PRODUCT_POLL_INTERVAL_MS = 2000;
 const MAX_RENDERED_PRODUCTS = 10;
 
 /* ------------------------------- data ------------------------------- */
 
 type Product = {
+  databaseId?: string;
   id: string;
   name: string;
   price: string;
@@ -78,6 +80,43 @@ type DatabaseProduct = {
 type ProductsResponse = {
   products: DatabaseProduct[];
 };
+
+type ExtensionPriceCheckResponse = {
+  ok: boolean;
+  result?: {
+    backend?: {
+      priceDropped?: boolean;
+      priceChanged?: boolean;
+      oldPrice?: number | null;
+      newPrice?: number | null;
+      newCurrency?: string | null;
+      name?: string;
+    };
+    extracted?: {
+      price?: number | null;
+      currency?: string | null;
+      method?: string;
+      rawText?: string | null;
+    } | null;
+    error?: string;
+  };
+  error?: string;
+};
+
+declare global {
+  interface Window {
+    chrome?: {
+      runtime?: {
+        lastError?: { message?: string };
+        sendMessage?: (
+          extensionId: string,
+          message: { type: string; productId: string },
+          callback: (response?: ExtensionPriceCheckResponse) => void,
+        ) => void;
+      };
+    };
+  }
+}
 
 const productPalettes = [
   ["#9cbad6", "#d9b3d7"],
@@ -195,6 +234,7 @@ function databaseProductsToProducts(databaseProducts: DatabaseProduct[]): Produc
     const palette = productPalettes[index % productPalettes.length];
 
     return {
+      databaseId: item.id,
       id: `db-${hash}`,
       name: item.name,
       price,
@@ -342,6 +382,56 @@ function App() {
   const lastSignature = useRef("");
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
+
+  const checkProductPrice = useCallback(async (product: Product) => {
+    if (!product.databaseId) {
+      console.warn("BloomCart price check skipped: product is not from the database", product);
+      return;
+    }
+
+    if (!window.chrome?.runtime?.sendMessage) {
+      setNotification("Price check needs the BloomCart Chrome extension.");
+      return;
+    }
+
+    setNotification(`Opening ${product.name} in a background tab for price check...`);
+
+    window.chrome.runtime.sendMessage(
+      BLOOMCART_EXTENSION_ID,
+      { type: "BLOOMCART_CHECK_PRODUCT_PRICE", productId: product.databaseId },
+      (response) => {
+        const runtimeError = window.chrome?.runtime?.lastError?.message;
+        console.log(runtimeError)
+
+        if (runtimeError) {
+          console.error("BloomCart extension price check failed:", runtimeError);
+          setNotification(`Price check failed: ${runtimeError}`);
+        }
+
+        console.log("fehdkjhdjkdhsjksdahksdbdsckjcgxajgsadkdsakdasghajdjsa")
+        console.log("BloomCart extension price check:", response);
+
+        if (!response?.ok) {
+          console.log(`Price check failed: ${response?.error ?? "unknown error"}`);
+          return;
+        }
+
+        const backend = response.result?.backend;
+
+        if (backend?.priceDropped) {
+          setNotification(`${product.name} dropped to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`);
+          return;
+        }
+
+        if (backend?.priceChanged) {
+          setNotification(`${product.name} changed to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`);
+          return;
+        }
+
+        setNotification(`Checked ${product.name}. No price drop found.`);
+      },
+    );
+  }, []);
 
   const syncDatabaseProducts = useCallback(async (manual = false) => {
     if (manual) {
@@ -509,7 +599,11 @@ function App() {
       )}
 
       {selected && (
-        <DetailModal product={selected} onClose={() => setSelectedId(null)} />
+        <DetailModal
+          onCheckPrice={checkProductPrice}
+          onClose={() => setSelectedId(null)}
+          product={selected}
+        />
       )}
     </div>
   );
@@ -1474,9 +1568,11 @@ function ClickableGroup({
 /* ------------------------------ detail modal ------------------------------ */
 
 function DetailModal({
+  onCheckPrice,
   product,
   onClose,
 }: {
+  onCheckPrice: (product: Product) => void;
   product: Product;
   onClose: () => void;
 }) {
@@ -1534,6 +1630,10 @@ function DetailModal({
         <div className="bc-verdict">
           “{product.verdict}” — {meta.blurb}
         </div>
+
+        <button className="bc-check-price" onClick={() => onCheckPrice(product)}>
+          Check price with browser
+        </button>
 
         <div className="bc-trend">
           <div className="bc-trend-label">Price trend</div>
@@ -1657,6 +1757,10 @@ function StyleTag() {
       .bc-modal-stats b { font-family: 'Baloo 2', cursive; font-size: 17px; color: #574234; }
       .bc-verdict { font-size: 13px; font-weight: 700; color: #6b5443; background: #f7efe1; border-radius: 12px;
         padding: 10px 13px; margin-bottom: 14px; }
+      .bc-check-price { width: 100%; border: none; border-radius: 13px; margin: 0 0 14px; padding: 10px 13px;
+        cursor: pointer; color: #fffdf7; background: var(--accent); font-family: 'Baloo 2', cursive;
+        font-size: 15px; font-weight: 800; box-shadow: 0 6px 15px rgba(120,90,60,0.18); }
+      .bc-check-price:hover { filter: brightness(1.04); transform: translateY(-1px); }
       .bc-trend-label { font-size: 11px; font-weight: 800; color: #9a8570; margin-bottom: 6px; }
       .bc-trend-bars { display: flex; align-items: flex-end; gap: 6px; height: 68px; }
       .bc-trend-bars span { flex: 1; background: #d8c6e6; border-radius: 6px 6px 3px 3px; min-height: 6px; }

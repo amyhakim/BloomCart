@@ -1,12 +1,16 @@
 import hashlib
+import html
+import json
 import os
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import httpx
 import psycopg
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
@@ -14,6 +18,7 @@ from psycopg.types.json import Jsonb
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/mydb")
 MAX_PRODUCTS = 10
+PRICE_FETCH_TIMEOUT_SECONDS = 20
 
 app = FastAPI()
 app.add_middleware(
@@ -41,6 +46,14 @@ class CartCapture(BaseModel):
     extractedAt: datetime | None = None
     productCount: int | None = None
     products: list[CapturedProduct] = Field(default_factory=list)
+
+
+class PriceCheckResult(BaseModel):
+    price: str | int | float | Decimal | None = None
+    currency: str | None = None
+    method: str = "extension-tab"
+    rawText: str | None = None
+    error: str | None = None
 
 
 def get_connection():
@@ -110,6 +123,82 @@ def clean_image_url(value: str | None) -> str | None:
     return normalized
 
 
+def find_price_in_json(value: Any) -> str | int | float | Decimal | None:
+    if isinstance(value, dict):
+        if "price" in value:
+            return value["price"]
+
+        for key in ("offers", "priceSpecification", "mainEntity", "item"):
+            price = find_price_in_json(value.get(key))
+            if price is not None:
+                return price
+
+        for child in value.values():
+            price = find_price_in_json(child)
+            if price is not None:
+                return price
+
+    if isinstance(value, list):
+        for child in value:
+            price = find_price_in_json(child)
+            if price is not None:
+                return price
+
+    return None
+
+
+def extract_price_from_html(page_html: str) -> tuple[Decimal | None, str | None, str | None]:
+    for script_match in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        page_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        script_text = html.unescape(script_match.group(1).strip())
+
+        try:
+            price, currency = parse_price(find_price_in_json(json.loads(script_text)))
+        except json.JSONDecodeError:
+            continue
+        
+        print(price)
+
+        if price is not None:
+            return price, currency, "json-ld"
+
+    meta_patterns = [
+        r'<meta[^>]+(?:property|name|itemprop)=["\'](?:product:price:amount|og:price:amount|price)["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name|itemprop)=["\'](?:product:price:amount|og:price:amount|price)["\']',
+    ]
+
+    for pattern in meta_patterns:
+        match = re.search(pattern, page_html, re.IGNORECASE)
+        if match:
+            price, currency = parse_price(html.unescape(match.group(1)))
+            if price is not None:
+                return price, currency, "meta"
+
+    selector_patterns = [
+        r'id=["\']priceblock_ourprice["\'][^>]*>([^<]+)',
+        r'id=["\']priceblock_dealprice["\'][^>]*>([^<]+)',
+        r'class=["\'][^"\']*a-offscreen[^"\']*["\'][^>]*>([^<]+)',
+    ]
+
+    for pattern in selector_patterns:
+        match = re.search(pattern, page_html, re.IGNORECASE)
+        if match:
+            price, currency = parse_price(html.unescape(match.group(1)))
+            if price is not None:
+                return price, currency, "selector"
+
+    match = re.search(r'(?:[$€£₹]\s?\d[\d,.]*|\d[\d,.]*\s?(?:USD|EUR|GBP|INR))', page_html, re.IGNORECASE)
+    if match:
+        price, currency = parse_price(match.group(0))
+        if price is not None:
+            return price, currency, "regex"
+
+    return None, None, None
+
+
 def stable_product_id(site: str, product: CapturedProduct) -> str:
     if product.sourceProductId:
         return product.sourceProductId
@@ -127,13 +216,17 @@ def stable_product_id(site: str, product: CapturedProduct) -> str:
 def serialize_product(row: dict[str, Any]) -> dict[str, Any]:
     price = row["price"]
     lowest_price = row["lowest_price"]
+    previous_price = row.get("previous_price")
 
     return {
         **row,
         "price": float(price) if price is not None else None,
         "lowest_price": float(lowest_price) if lowest_price is not None else None,
+        "previous_price": float(previous_price) if previous_price is not None else None,
         "captured_at": row["captured_at"].isoformat() if row["captured_at"] else None,
         "last_seen_at": row["last_seen_at"].isoformat() if row["last_seen_at"] else None,
+        "last_checked_at": row.get("last_checked_at").isoformat() if row.get("last_checked_at") else None,
+        "price_changed_at": row.get("price_changed_at").isoformat() if row.get("price_changed_at") else None,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
     }
@@ -177,6 +270,11 @@ def startup():
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS products_last_seen_idx ON products (last_seen_at DESC)")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS previous_price NUMERIC(12, 2)")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS price_changed_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS check_error TEXT")
+        conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS price_check_method TEXT")
 
 
 @app.get("/")
@@ -301,6 +399,11 @@ def list_products(limit: int = MAX_PRODUCTS):
               image_url,
               captured_at,
               last_seen_at,
+              previous_price,
+              last_checked_at,
+              price_changed_at,
+              check_error,
+              price_check_method,
               lowest_price,
               rating,
               verdict,
@@ -319,3 +422,179 @@ def list_products(limit: int = MAX_PRODUCTS):
         columns = [column.name for column in cursor.description] if cursor.description else []
 
     return {"products": [serialize_product(dict(zip(columns, row, strict=True))) for row in rows]}
+
+
+@app.get("/products/{product_id}")
+def get_product(product_id: str):
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT
+              id::text,
+              source_site,
+              source_product_id,
+              source_url,
+              cart_url,
+              name,
+              price,
+              currency,
+              quantity,
+              image_url,
+              captured_at,
+              last_seen_at,
+              previous_price,
+              last_checked_at,
+              price_changed_at,
+              check_error,
+              price_check_method,
+              lowest_price,
+              rating,
+              verdict,
+              badge,
+              shelf,
+              raw_product,
+              created_at,
+              updated_at
+            FROM products
+            WHERE id = %s
+            """,
+            (product_id,),
+        )
+        row = cursor.fetchone()
+        columns = [column.name for column in cursor.description] if cursor.description else []
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    return serialize_product(dict(zip(columns, row, strict=True)))
+
+
+@app.post("/products/{product_id}/price-check-result")
+def save_price_check_result(product_id: str, result: PriceCheckResult):
+    checked_price, checked_currency = parse_price(result.price)
+    checked_currency = result.currency or checked_currency
+
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id::text, name, price, currency
+            FROM products
+            WHERE id = %s
+            """,
+            (product_id,),
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        old_price = row[2]
+        old_currency = row[3]
+        price_changed = checked_price is not None and old_price is not None and checked_price != old_price
+        price_dropped = price_changed and checked_price < old_price
+
+        conn.execute(
+            """
+            UPDATE products
+            SET
+              previous_price = CASE
+                WHEN %(checked_price)s IS NOT NULL AND price IS DISTINCT FROM %(checked_price)s THEN price
+                ELSE previous_price
+              END,
+              price = COALESCE(%(checked_price)s, price),
+              currency = COALESCE(%(checked_currency)s, currency),
+              lowest_price = CASE
+                WHEN %(checked_price)s IS NULL THEN lowest_price
+                WHEN lowest_price IS NULL THEN %(checked_price)s
+                ELSE LEAST(lowest_price, %(checked_price)s)
+              END,
+              last_checked_at = now(),
+              price_changed_at = CASE
+                WHEN %(checked_price)s IS NOT NULL AND price IS DISTINCT FROM %(checked_price)s THEN now()
+                ELSE price_changed_at
+              END,
+              check_error = %(check_error)s,
+              price_check_method = %(price_check_method)s,
+              updated_at = now()
+            WHERE id = %(product_id)s
+            """,
+            {
+                "checked_price": checked_price,
+                "checked_currency": checked_currency,
+                "check_error": result.error,
+                "price_check_method": result.method,
+                "product_id": product_id,
+            },
+        )
+
+    return {
+        "ok": True,
+        "productId": product_id,
+        "name": row[1],
+        "oldPrice": float(old_price) if old_price is not None else None,
+        "oldCurrency": old_currency,
+        "newPrice": float(checked_price) if checked_price is not None else None,
+        "newCurrency": checked_currency,
+        "rawText": result.rawText,
+        "method": result.method,
+        "error": result.error,
+        "priceChanged": bool(price_changed),
+        "priceDropped": bool(price_dropped),
+    }
+
+
+@app.post("/products/{product_id}/check-price")
+def check_product_price(product_id: str):
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id::text, name, source_site, source_url, price, currency
+            FROM products
+            WHERE id = %s
+            """,
+            (product_id,),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    product = {
+        "id": row[0],
+        "name": row[1],
+        "source_site": row[2],
+        "source_url": "https://www.amazon.com/Black-Retractable-Rollerball-Smooth-Writing/dp/B08G1FSHYZ?pd_rd_w=07xXc&content-id=amzn1.sym.4ce6c22d-fc22-4c3e-8a0c-88c5faf77c35&pf_rd_p=4ce6c22d-fc22-4c3e-8a0c-88c5faf77c35&pf_rd_r=PKV2TYXGAS778Y1AP3KV&pd_rd_wg=oAbKo&pd_rd_r=1a5d1582-fe90-4312-8e52-c81ec212da2f&pd_rd_i=B08G1FSHYZ&psc=1",
+        "stored_price": float(row[4]) if row[4] is not None else None,
+        "stored_currency": row[5],
+    }
+
+    print(product)
+
+    if not product["source_url"]:
+        raise HTTPException(status_code=400, detail="Product does not have a source URL")
+
+    try:
+        response = httpx.get(
+            product["source_url"],
+            follow_redirects=True,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            },
+            timeout=PRICE_FETCH_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail=f"Could not fetch product page: {error}") from error
+
+    price, currency, method = extract_price_from_html(response.text)
+
+    return {
+        **product,
+        "checked_price": float(price) if price is not None else None,
+        "checked_currency": currency,
+        "method": method,
+        "fetched_url": str(response.url),
+        "status_code": response.status_code,
+        "found": price is not None,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
