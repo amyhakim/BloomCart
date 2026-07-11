@@ -767,6 +767,7 @@ function Dragon({
   const leftEye = useRef<THREE.Mesh>(null)
   const rightEye = useRef<THREE.Mesh>(null)
   const [blink, setBlink] = useState(false)
+  const hornStripes = [-0.04, 0.04, 0.12]
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -799,60 +800,189 @@ function Dragon({
   return (
     <ClickableGroup onClick={() => setView('dragon')}>
       <group ref={group} position={[0, 0.86, -0.48]}>
-        <mesh castShadow position={[0, -0.18, 0]}>
-          <sphereGeometry args={[0.28, 32, 20]} />
-          <meshStandardMaterial color="#95bfdd" roughness={0.78} />
+        <mesh castShadow position={[0, -0.18, 0]} scale={[0.78, 1.02, 0.68]}>
+          <sphereGeometry args={[0.31, 36, 24]} />
+          <meshStandardMaterial color="#a8d9ae" roughness={0.82} />
         </mesh>
-        <group ref={head} position={[0, 0.2, 0.02]}>
-          <mesh castShadow scale={[1.22, 0.96, 0.94]}>
-            <sphereGeometry args={[0.34, 40, 24]} />
-            <meshStandardMaterial color="#a9cbe7" roughness={0.72} />
+        <mesh castShadow position={[0, -0.18, 0.24]} scale={[0.6, 0.92, 0.16]}>
+          <sphereGeometry args={[0.25, 32, 18]} />
+          <meshStandardMaterial color="#d9f58b" roughness={0.82} />
+        </mesh>
+        {[-0.02, -0.11, -0.2].map((y) => (
+          <mesh key={y} position={[0, y, 0.285]} rotation={[0, 0, Math.PI / 4]}>
+            <boxGeometry args={[0.28, 0.016, 0.012]} />
+            <meshStandardMaterial color="#8fbf4e" roughness={0.75} />
           </mesh>
-          <mesh castShadow position={[0, -0.05, 0.28]} scale={[0.95, 0.56, 0.38]}>
+        ))}
+        <group ref={head} position={[0, 0.24, 0.04]}>
+          <mesh castShadow scale={[1.28, 1.02, 0.92]}>
+            <sphereGeometry args={[0.36, 48, 28]} />
+            <meshStandardMaterial color="#a9dcb2" roughness={0.82} />
+          </mesh>
+          <mesh castShadow position={[0, -0.08, 0.29]} scale={[0.9, 0.48, 0.36]}>
             <sphereGeometry args={[0.22, 32, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+            <meshStandardMaterial color="#bfe5b8" roughness={0.84} />
           </mesh>
-          <mesh ref={leftEye} position={[-0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
-            <sphereGeometry args={[0.035, 16, 12]} />
-            <meshStandardMaterial color="#26323a" roughness={0.4} />
+          <mesh position={[-0.18, -0.06, 0.34]} scale={[1.2, 0.7, 0.2]}>
+            <sphereGeometry args={[0.075, 20, 12]} />
+            <meshStandardMaterial color="#f4c9a6" transparent opacity={0.55} roughness={0.9} />
           </mesh>
-          <mesh ref={rightEye} position={[0.105, 0.055, 0.31]} scale={[1, blink ? 0.08 : 1, 1]}>
-            <sphereGeometry args={[0.035, 16, 12]} />
-            <meshStandardMaterial color="#26323a" roughness={0.4} />
+          <mesh position={[0.18, -0.06, 0.34]} scale={[1.2, 0.7, 0.2]}>
+            <sphereGeometry args={[0.075, 20, 12]} />
+            <meshStandardMaterial color="#f4c9a6" transparent opacity={0.55} roughness={0.9} />
           </mesh>
-          <mesh position={[-0.105, 0.055, 0.315]} rotation={[0, 0, 0]}>
-            <torusGeometry args={[0.07, 0.007, 10, 36]} />
-            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          <mesh ref={leftEye} position={[-0.13, 0.02, 0.335]} scale={[1, blink ? 0.08 : 1, 1]}>
+            <sphereGeometry args={[0.045, 18, 12]} />
+            <meshStandardMaterial color="#35412f" roughness={0.4} />
           </mesh>
-          <mesh position={[0.105, 0.055, 0.315]}>
-            <torusGeometry args={[0.07, 0.007, 10, 36]} />
-            <meshStandardMaterial color="#5b4b6a" roughness={0.35} metalness={0.05} />
+          <mesh ref={rightEye} position={[0.13, 0.02, 0.335]} scale={[1, blink ? 0.08 : 1, 1]}>
+            <sphereGeometry args={[0.045, 18, 12]} />
+            <meshStandardMaterial color="#35412f" roughness={0.4} />
           </mesh>
-          <mesh position={[0, 0.055, 0.318]}>
-            <boxGeometry args={[0.07, 0.01, 0.01]} />
-            <meshStandardMaterial color="#5b4b6a" />
+          <mesh position={[-0.112, 0.03, 0.368]}>
+            <sphereGeometry args={[0.014, 10, 8]} />
+            <meshStandardMaterial color="#fff9e9" roughness={0.25} />
           </mesh>
-          <mesh position={[-0.16, 0.27, 0.03]} rotation={[0, 0, 0.35]}>
-            <coneGeometry args={[0.055, 0.16, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          <mesh position={[0.148, 0.03, 0.368]}>
+            <sphereGeometry args={[0.014, 10, 8]} />
+            <meshStandardMaterial color="#fff9e9" roughness={0.25} />
           </mesh>
-          <mesh position={[0.16, 0.27, 0.03]} rotation={[0, 0, -0.35]}>
-            <coneGeometry args={[0.055, 0.16, 18]} />
-            <meshStandardMaterial color="#d8c3ea" roughness={0.8} />
+          <mesh position={[-0.13, 0.02, 0.358]} rotation={[0, 0, 0]}>
+            <torusGeometry args={[0.122, 0.012, 12, 48]} />
+            <meshStandardMaterial color="#ff3338" roughness={0.32} />
+          </mesh>
+          <mesh position={[0.13, 0.02, 0.358]} rotation={[0, 0, 0]}>
+            <torusGeometry args={[0.122, 0.012, 12, 48]} />
+            <meshStandardMaterial color="#ff3338" roughness={0.32} />
+          </mesh>
+          <mesh position={[0, 0.02, 0.36]}>
+            <boxGeometry args={[0.06, 0.018, 0.018]} />
+            <meshStandardMaterial color="#ff3338" roughness={0.32} />
+          </mesh>
+          <mesh position={[-0.275, 0.015, 0.34]} rotation={[0, 0, -0.2]}>
+            <boxGeometry args={[0.08, 0.016, 0.018]} />
+            <meshStandardMaterial color="#ff3338" roughness={0.32} />
+          </mesh>
+          <mesh position={[0.275, 0.015, 0.34]} rotation={[0, 0, 0.2]}>
+            <boxGeometry args={[0.08, 0.016, 0.018]} />
+            <meshStandardMaterial color="#ff3338" roughness={0.32} />
+          </mesh>
+          <mesh position={[-0.17, 0.08, 0.382]} rotation={[0, 0, -0.52]}>
+            <boxGeometry args={[0.035, 0.19, 0.008]} />
+            <meshStandardMaterial color="#fffdf0" transparent opacity={0.72} roughness={0.12} />
+          </mesh>
+          <mesh position={[0.18, 0.08, 0.382]} rotation={[0, 0, -0.52]}>
+            <boxGeometry args={[0.035, 0.19, 0.008]} />
+            <meshStandardMaterial color="#fffdf0" transparent opacity={0.72} roughness={0.12} />
+          </mesh>
+          <mesh position={[-0.04, -0.08, 0.37]} rotation={[0, 0, 0.45]}>
+            <torusGeometry args={[0.045, 0.006, 8, 28]} />
+            <meshStandardMaterial color="#22281e" roughness={0.5} />
+          </mesh>
+          <mesh position={[0.04, -0.08, 0.37]} rotation={[0, 0, -0.45]}>
+            <torusGeometry args={[0.045, 0.006, 8, 28]} />
+            <meshStandardMaterial color="#22281e" roughness={0.5} />
+          </mesh>
+          <mesh position={[0, -0.145, 0.37]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.065, 0.006, 8, 32, Math.PI]} />
+            <meshStandardMaterial color="#22281e" roughness={0.55} />
+          </mesh>
+          <group position={[0, 0.36, 0.03]}>
+            <mesh castShadow rotation={[0, 0, 0]}>
+              <coneGeometry args={[0.082, 0.28, 24]} />
+              <meshStandardMaterial color="#d8fb74" roughness={0.72} />
+            </mesh>
+            {hornStripes.map((y) => (
+              <mesh key={y} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[0.048 + y * 0.08, 0.006, 8, 28]} />
+                <meshStandardMaterial color="#8cc23e" roughness={0.7} />
+              </mesh>
+            ))}
+          </group>
+          {[
+            [-0.27, 0.23, 0.01, 0.78],
+            [0.27, 0.23, 0.01, -0.78],
+          ].map(([x, y, z, rotationZ]) => (
+            <group key={x} position={[x, y, z]} rotation={[0.05, 0, rotationZ]}>
+              <mesh castShadow>
+                <coneGeometry args={[0.075, 0.24, 24]} />
+                <meshStandardMaterial color="#d8fb74" roughness={0.72} />
+              </mesh>
+              {[-0.035, 0.035].map((stripeY) => (
+                <mesh key={stripeY} position={[0, stripeY, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                  <torusGeometry args={[0.052, 0.005, 8, 24]} />
+                  <meshStandardMaterial color="#8cc23e" roughness={0.7} />
+                </mesh>
+              ))}
+            </group>
+          ))}
+          {[
+            [-0.36, 0.04, 0, 0.78],
+            [0.36, 0.04, 0, -0.78],
+          ].map(([x, y, z, rotationZ]) => (
+            <group key={x} position={[x, y, z]} rotation={[0.05, 0, rotationZ]}>
+              <mesh castShadow scale={[0.12, 0.22, 0.035]}>
+                <sphereGeometry args={[1, 18, 10]} />
+                <meshStandardMaterial color="#8fcda0" roughness={0.82} />
+              </mesh>
+              <mesh position={[0, 0, 0.018]} scale={[0.08, 0.15, 0.018]}>
+                <sphereGeometry args={[1, 16, 8]} />
+                <meshStandardMaterial color="#d8fb74" roughness={0.82} />
+              </mesh>
+            </group>
+          ))}
+        </group>
+        <group position={[0, 0.04, 0.29]}>
+          <mesh position={[-0.055, 0, 0]} rotation={[0, 0, -0.95]} scale={[1.25, 0.78, 0.22]}>
+            <coneGeometry args={[0.08, 0.16, 20]} />
+            <meshStandardMaterial color="#f63a31" roughness={0.45} />
+          </mesh>
+          <mesh position={[0.055, 0, 0]} rotation={[0, 0, 0.95]} scale={[1.25, 0.78, 0.22]}>
+            <coneGeometry args={[0.08, 0.16, 20]} />
+            <meshStandardMaterial color="#f63a31" roughness={0.45} />
+          </mesh>
+          <mesh position={[0, 0, 0.006]}>
+            <sphereGeometry args={[0.032, 16, 10]} />
+            <meshStandardMaterial color="#da3028" roughness={0.45} />
           </mesh>
         </group>
-        <mesh castShadow position={[-0.31, -0.12, -0.04]} rotation={[0.15, 0.4, 0.7]} scale={[0.08, 0.2, 0.03]}>
-          <sphereGeometry args={[1, 16, 12]} />
-          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
-        </mesh>
-        <mesh castShadow position={[0.31, -0.12, -0.04]} rotation={[0.15, -0.4, -0.7]} scale={[0.08, 0.2, 0.03]}>
-          <sphereGeometry args={[1, 16, 12]} />
-          <meshStandardMaterial color="#c2a5dd" roughness={0.74} />
-        </mesh>
-        <group ref={tail} position={[0, -0.2, -0.28]}>
-          <mesh castShadow rotation={[1.1, 0, 0]} scale={[0.07, 0.07, 0.36]}>
+        {[
+          [-0.34, -0.16, -0.02, 0.64],
+          [0.34, -0.16, -0.02, -0.64],
+        ].map(([x, y, z, rotationZ]) => (
+          <group key={x} position={[x, y, z]} rotation={[0.18, 0, rotationZ]}>
+            <mesh castShadow scale={[0.13, 0.34, 0.035]}>
+              <sphereGeometry args={[1, 20, 12]} />
+              <meshStandardMaterial color="#8ecfa0" roughness={0.84} />
+            </mesh>
+            <mesh position={[0, -0.02, 0.018]} scale={[0.08, 0.24, 0.02]}>
+              <sphereGeometry args={[1, 16, 10]} />
+              <meshStandardMaterial color="#d9fb78" roughness={0.84} />
+            </mesh>
+          </group>
+        ))}
+        {[-0.16, 0.16].map((x) => (
+          <group key={x} position={[x, -0.51, 0.12]}>
+            <mesh castShadow scale={[0.13, 0.08, 0.18]}>
+              <sphereGeometry args={[1, 18, 12]} />
+              <meshStandardMaterial color="#a8d9ae" roughness={0.82} />
+            </mesh>
+            {[-0.045, 0, 0.045].map((toeX) => (
+              <mesh key={toeX} position={[toeX, -0.018, 0.12]} scale={[0.034, 0.026, 0.035]}>
+                <sphereGeometry args={[1, 10, 8]} />
+                <meshStandardMaterial color="#ecffd0" roughness={0.8} />
+              </mesh>
+            ))}
+          </group>
+        ))}
+        <group ref={tail} position={[0.27, -0.38, -0.24]} rotation={[0.2, 0.3, -0.8]}>
+          <mesh castShadow scale={[0.065, 0.065, 0.3]}>
             <sphereGeometry args={[1, 16, 12]} />
-            <meshStandardMaterial color="#8fb8d8" roughness={0.8} />
+            <meshStandardMaterial color="#9ed7a8" roughness={0.82} />
+          </mesh>
+          <mesh castShadow position={[0.14, -0.08, 0.18]} rotation={[0.25, 0.4, 0.85]} scale={[0.055, 0.055, 0.22]}>
+            <sphereGeometry args={[1, 16, 10]} />
+            <meshStandardMaterial color="#d9fb78" roughness={0.82} />
           </mesh>
         </group>
       </group>
