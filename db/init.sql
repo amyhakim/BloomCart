@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS products (
   source_url TEXT,
   cart_url TEXT,
 
-  prices INT[],
+  prices NUMERIC(12, 2)[],
 
   name TEXT NOT NULL,
   currency TEXT,
