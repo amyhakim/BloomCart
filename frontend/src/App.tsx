@@ -38,6 +38,7 @@ const API_BASE_URL = "http://localhost:8080";
 const BLOOMCART_EXTENSION_ID = "naflnfaamlcdjakgmhaiggmolhceiaok";
 const PRODUCT_POLL_INTERVAL_MS = 2000;
 const MAX_RENDERED_PRODUCTS = 10;
+const RETSUKO_AUDIO_URL = "/audio/retsuko.mp3";
 
 const INVERT_DRAG_X = false; // set true to reverse left/right
 const INVERT_DRAG_Y = false; // set true to reverse up/down
@@ -145,6 +146,7 @@ type ExtensionPriceCheckResponse = {
 
 declare global {
   interface Window {
+    webkitAudioContext?: typeof AudioContext;
     chrome?: {
       runtime?: {
         lastError?: { message?: string };
@@ -1173,6 +1175,8 @@ function Retsuko({
   setView: (v: CameraView) => void;
 }) {
   const group = useRef<THREE.Group>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const { scene, animations } = useGLTF(RETSUKO_MODEL_URL);
   const { actions, names } = useAnimations(animations, group);
 
@@ -1193,8 +1197,77 @@ function Retsuko({
     };
   }, [actions, names]);
 
+  useEffect(() => {
+    const audio = new Audio(RETSUKO_AUDIO_URL);
+    audio.preload = "auto";
+    audioRef.current = audio;
+
+    return () => {
+      audio.pause();
+      audioRef.current = null;
+      void audioContextRef.current?.close().catch(() => {});
+      audioContextRef.current = null;
+    };
+  }, []);
+
+  const playFallbackTone = () => {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextCtor) {
+      return;
+    }
+
+    const context =
+      audioContextRef.current && audioContextRef.current.state !== "closed"
+        ? audioContextRef.current
+        : new AudioContextCtor();
+    audioContextRef.current = context;
+
+    const startTone = () => {
+      const now = context.currentTime;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(392, now);
+      oscillator.frequency.linearRampToValueAtTime(523.25, now + 0.18);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.34);
+    };
+
+    if (context.state === "suspended") {
+      void context.resume().then(startTone).catch(() => {});
+      return;
+    }
+
+    startTone();
+  };
+
+  const handleClick = () => {
+    const audio = audioRef.current;
+
+    if (audio) {
+      audio.currentTime = 0;
+      void audio.play().catch((error) => {
+        console.warn("BloomCart could not play the Retsuko audio:", error);
+        playFallbackTone();
+      });
+    } else {
+      playFallbackTone();
+    }
+
+    setView("register");
+  };
+
   return (
-    <ClickableGroup onClick={() => setView("register")}>
+    <ClickableGroup onClick={handleClick}>
       <group
         ref={group}
         position={RETSUKO_POSITION}
