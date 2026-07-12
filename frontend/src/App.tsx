@@ -122,6 +122,12 @@ type EcoSummaryResponse = {
   product: DatabaseProduct;
 };
 
+type BuyAlert = {
+  productId: string;
+  title: string;
+  detail: string;
+};
+
 type ExtensionPriceCheckResponse = {
   ok: boolean;
   result?: {
@@ -129,6 +135,7 @@ type ExtensionPriceCheckResponse = {
       priceDropped?: boolean;
       priceChanged?: boolean;
       oldPrice?: number | null;
+      oldCurrency?: string | null;
       newPrice?: number | null;
       newCurrency?: string | null;
       name?: string;
@@ -266,6 +273,16 @@ function formatProductPrice(product: DatabaseProduct) {
   return `${currencyPrefix}${resolvedPrice.toFixed(2)}`;
 }
 
+function formatCurrencyValue(currency: string | null, value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Unknown";
+  }
+
+  const currencyPrefix =
+    currency === "USD" ? "$" : currency ? `${currency} ` : "";
+  return `${currencyPrefix}${value.toFixed(2)}`;
+}
+
 function formatCapturedDate(value: string | null) {
   if (!value) {
     return "Captured";
@@ -295,6 +312,13 @@ function buildPriceTrend(prices: number[] | null) {
 function shouldGenerateEcoVerdict(verdict: string) {
   const normalized = verdict.trim();
   return !normalized || normalized === "Recently captured";
+}
+
+function getLatestDatabasePrice(product: DatabaseProduct) {
+  return product.price ??
+    (product.prices && product.prices.length
+      ? product.prices[product.prices.length - 1]
+      : null);
 }
 
 function databaseProductsToProducts(
@@ -451,10 +475,12 @@ function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [buyAlert, setBuyAlert] = useState<BuyAlert | null>(null);
   const [notification, setNotification] = useState(
     "Hi! I\u2019m Sprout. Drag to look around your archive.",
   );
   const lastSignature = useRef("");
+  const hasHydratedProducts = useRef(false);
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
 
@@ -472,6 +498,10 @@ function App() {
     );
   }, []);
 
+  const showBuyAlert = useCallback((alert: BuyAlert) => {
+    setBuyAlert(alert);
+  }, []);
+
   const checkProductPrice = useCallback(async (product: Product) => {
     if (!product.databaseId) {
       console.warn(
@@ -480,6 +510,8 @@ function App() {
       );
       return;
     }
+
+    const databaseId = product.databaseId;
 
     if (!window.chrome?.runtime?.sendMessage) {
       setNotification("Price check needs the BloomCart Chrome extension.");
@@ -492,7 +524,7 @@ function App() {
 
     window.chrome.runtime.sendMessage(
       BLOOMCART_EXTENSION_ID,
-      { type: "BLOOMCART_CHECK_PRODUCT_PRICE", productId: product.databaseId },
+      { type: "BLOOMCART_CHECK_PRODUCT_PRICE", productId: databaseId },
       (response) => {
         const runtimeError = window.chrome?.runtime?.lastError?.message;
         console.log(runtimeError);
@@ -518,6 +550,11 @@ function App() {
         const backend = response.result?.backend;
 
         if (backend?.priceDropped) {
+          showBuyAlert({
+            productId: databaseId,
+            title: `${product.name} is ready to buy`,
+            detail: `Dropped from ${formatCurrencyValue(backend.oldCurrency ?? null, backend.oldPrice)} to ${formatCurrencyValue(backend.newCurrency ?? null, backend.newPrice)}.`,
+          });
           setNotification(
             `${product.name} dropped to ${backend.newCurrency ? `${backend.newCurrency} ` : ""}${backend.newPrice}.`,
           );
@@ -571,6 +608,44 @@ function App() {
 
     lastSignature.current = signature;
 
+    if (hasHydratedProducts.current) {
+      const previousProductsById = new Map(
+        products
+          .filter((product) => product.databaseId)
+          .map((product) => [product.databaseId as string, product]),
+      );
+
+      for (const item of databaseProducts) {
+        const previous = previousProductsById.get(item.id);
+        if (!previous) {
+          continue;
+        }
+
+        const nextShelf = normalizeShelf(item.shelf);
+        const previousPrice = previous.graph[previous.graph.length - 1] ?? null;
+        const nextPrice = getLatestDatabasePrice(item);
+        const newlyBuyable = previous.shelf !== "Buy" && nextShelf === "Buy";
+        const droppedAgainOnBuyWall =
+          previous.shelf === "Buy" &&
+          nextShelf === "Buy" &&
+          previousPrice !== null &&
+          nextPrice !== null &&
+          nextPrice < previousPrice;
+
+        if (newlyBuyable || droppedAgainOnBuyWall) {
+          showBuyAlert({
+            productId: item.id,
+            title: `${item.name} is ready to buy`,
+            detail:
+              previousPrice !== null && nextPrice !== null
+                ? `Now ${formatCurrencyValue(item.currency, nextPrice)} from ${formatCurrencyValue(item.currency, previousPrice)}.`
+                : "A new deal just landed on the Buy wall.",
+          });
+          break;
+        }
+      }
+    }
+
     const capturedProducts = databaseProductsToProducts(databaseProducts);
     const visibleCount = capturedProducts.length;
     const site = databaseProducts[0]?.source_site ?? "the database";
@@ -583,9 +658,10 @@ function App() {
         ? `${visibleCount} saved product${visibleCount === 1 ? "" : "s"} loaded from ${site}.`
         : "No saved products found yet.",
     );
+    hasHydratedProducts.current = true;
     setIsAnalyzing(true);
     window.setTimeout(() => setIsAnalyzing(false), 1200);
-  }, []);
+  }, [products, showBuyAlert]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -639,6 +715,20 @@ function App() {
       cancelled = true;
     };
   }, [applyDatabaseProductUpdate, selected]);
+
+  useEffect(() => {
+    if (!buyAlert) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBuyAlert((current) =>
+        current?.productId === buyAlert.productId ? null : current,
+      );
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [buyAlert]);
 
   const counts = useMemo(() => {
     const c: Record<Shelf, number> = {
@@ -699,6 +789,22 @@ function App() {
         <span className="bc-speech-tail" aria-hidden />
         {isAnalyzing ? "Analyzing price history and quality…" : notification}
       </div>
+
+      {buyAlert && (
+        <div className="bc-buy-alert" role="status" aria-live="polite">
+          <div>
+            <strong>{buyAlert.title}</strong>
+            <span>{buyAlert.detail}</span>
+          </div>
+          <button
+            className="bc-buy-alert-close"
+            onClick={() => setBuyAlert(null)}
+            aria-label="Dismiss buy alert"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="bc-actions">
         <button
@@ -1522,6 +1628,14 @@ function StyleTag() {
         border-radius: 32px 32px 32px 10px; box-shadow: 0 8px 0px rgba(92, 67, 49, 0.08); border: 4px solid #eaddca; }
       .bc-speech-tail { position: absolute; left: 24px; bottom: -12px; width: 18px; height: 18px; background: #fffff5;
         border-right: 4px solid #eaddca; border-bottom: 4px solid #eaddca; transform: rotate(45deg); }
+
+      .bc-buy-alert { position: absolute; right: 18px; top: 92px; display: flex; align-items: flex-start; gap: 12px;
+        max-width: 360px; background: #fff7df; color: #5c4331; padding: 14px 16px; border-radius: 24px;
+        border: 4px solid #cfe6bf; box-shadow: 0 8px 0px rgba(92, 67, 49, 0.12); }
+      .bc-buy-alert strong { display: block; font-family: 'Baloo 2', cursive; font-size: 18px; color: #6a9f46; line-height: 1.1; }
+      .bc-buy-alert span { display: block; margin-top: 4px; font-size: 13px; font-weight: 800; color: #745f46; }
+      .bc-buy-alert-close { border: none; background: transparent; color: #6a9f46; font-size: 22px; font-weight: 900;
+        line-height: 1; padding: 0; cursor: pointer; }
 
       /* Action Buttons */
       .bc-actions { position: absolute; left: 18px; bottom: 22px; display: flex; gap: 10px; }
