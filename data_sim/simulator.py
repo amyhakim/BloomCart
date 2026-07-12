@@ -6,6 +6,8 @@ from decimal import Decimal
 import psycopg2
 
 DATABASE_URL = os.environ["DATABASE_URL"]
+BUY_SHELF = "Buy"
+WAITING_SHELF = "Waiting for a Sale"
 
 
 def connect():
@@ -50,12 +52,27 @@ while True:
                     UPDATE products
                     SET prices = array_append(COALESCE(prices, ARRAY[]::NUMERIC(12, 2)[]), %s),
                         previous_price = %s,
+                        shelf = CASE
+                            WHEN %s < %s THEN %s
+                            WHEN %s > %s THEN %s
+                            ELSE shelf
+                        END,
                         updated_at = now(),
                         last_checked_at = now(),
                         price_changed_at = now()
                     WHERE id = %s
                     """,
-                    (new_price, current, product_id),
+                    (
+                        new_price,
+                        current,
+                        new_price,
+                        current,
+                        BUY_SHELF,
+                        new_price,
+                        current,
+                        WAITING_SHELF,
+                        product_id,
+                    ),
                 )
 
                 print(f"{product_id}: {current} -> {new_price}")

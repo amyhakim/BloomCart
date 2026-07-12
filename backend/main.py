@@ -27,6 +27,8 @@ GEMINI_TIMEOUT_SECONDS = 20
 MAX_PRODUCTS = 10
 PRICE_FETCH_TIMEOUT_SECONDS = 20
 DEFAULT_VERDICTS = {"Recently captured", ""}
+BUY_SHELF = "Buy"
+WAITING_SHELF = "Waiting for a Sale"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
@@ -435,6 +437,13 @@ def capture_products(capture: CartCapture):
                         WHEN products.prices[array_length(products.prices, 1)] IS DISTINCT FROM EXCLUDED.prices[1] THEN now()
                         ELSE products.price_changed_at
                     END,
+                    shelf = CASE
+                        WHEN array_length(EXCLUDED.prices, 1) IS NULL THEN products.shelf
+                        WHEN COALESCE(array_length(products.prices, 1), 0) = 0 THEN products.shelf
+                        WHEN EXCLUDED.prices[1] < products.prices[array_length(products.prices, 1)] THEN %(buy_shelf)s
+                        WHEN EXCLUDED.prices[1] > products.prices[array_length(products.prices, 1)] THEN %(waiting_shelf)s
+                        ELSE products.shelf
+                    END,
                     badge = EXCLUDED.badge,
                     raw_product = EXCLUDED.raw_product,
                     updated_at = now()
@@ -453,7 +462,9 @@ def capture_products(capture: CartCapture):
                     "rating": "Analyzing",
                     "verdict": "Recently captured",
                     "badge": f"Qty {quantity}" if quantity > 1 else "New",
-                    "shelf": "Recently Added",
+                    "shelf": WAITING_SHELF,
+                    "buy_shelf": BUY_SHELF,
+                    "waiting_shelf": WAITING_SHELF,
                     "raw_product": Jsonb({**raw_product, "positionIndex": index}),
                 },
             )
@@ -694,6 +705,13 @@ def save_price_check_result(product_id: str, result: PriceCheckResult):
                 WHEN %(checked_price)s IS NOT NULL AND COALESCE(array_length(prices, 1), 0) = 0 THEN now()
                 ELSE price_changed_at
               END,
+              shelf = CASE
+                WHEN %(checked_price)s IS NULL THEN shelf
+                WHEN COALESCE(array_length(prices, 1), 0) = 0 THEN shelf
+                WHEN %(checked_price)s < prices[array_length(prices, 1)] THEN %(buy_shelf)s
+                WHEN %(checked_price)s > prices[array_length(prices, 1)] THEN %(waiting_shelf)s
+                ELSE shelf
+              END,
               check_error = %(check_error)s,
               price_check_method = %(price_check_method)s,
               updated_at = now()
@@ -704,6 +722,8 @@ def save_price_check_result(product_id: str, result: PriceCheckResult):
                 "checked_currency": checked_currency,
                 "check_error": result.error,
                 "price_check_method": result.method,
+                "buy_shelf": BUY_SHELF,
+                "waiting_shelf": WAITING_SHELF,
                 "product_id": product_id,
             },
         )
