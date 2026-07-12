@@ -84,6 +84,9 @@ type Product = {
   isNew?: boolean;
   imageUrl?: string | null;
   position?: [number, number, number];
+  url?: string | null;
+  priceValue?: number | null;
+  currency?: string | null;
 };
 
 type DatabaseProduct = {
@@ -246,12 +249,17 @@ async function generateEcoSummary(productId: string) {
   return (await response.json()) as EcoSummaryResponse;
 }
 
-function formatProductPrice(product: DatabaseProduct) {
-  const resolvedPrice =
+function resolveNumericPrice(product: DatabaseProduct) {
+  return (
     product.price ??
     (product.prices && product.prices.length
       ? product.prices[product.prices.length - 1]
-      : null);
+      : null)
+  );
+}
+
+function formatProductPrice(product: DatabaseProduct) {
+  const resolvedPrice = resolveNumericPrice(product);
 
   if (resolvedPrice === null) {
     return "Unknown";
@@ -264,6 +272,11 @@ function formatProductPrice(product: DatabaseProduct) {
         ? `${product.currency} `
         : "";
   return `${currencyPrefix}${resolvedPrice.toFixed(2)}`;
+}
+
+function formatCurrencyValue(value: number, currency?: string | null) {
+  const prefix = currency && currency !== "USD" ? `${currency} ` : "$";
+  return `${prefix}${value.toFixed(2)}`;
 }
 
 function formatCapturedDate(value: string | null) {
@@ -332,6 +345,9 @@ function databaseProductsToProducts(
       graph: buildPriceTrend(item.prices),
       isNew: true,
       imageUrl: item.image_url,
+      url: item.source_url ?? item.cart_url ?? null,
+      currency: item.currency ?? null,
+      priceValue: resolveNumericPrice(item),
     };
   });
 }
@@ -454,9 +470,58 @@ function App() {
   const [notification, setNotification] = useState(
     "Hi! I\u2019m Sprout. Drag to look around your archive.",
   );
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const lastSignature = useRef("");
+  const knownProductIds = useRef<Set<string>>(new Set());
 
   const selected = products.find((p) => p.id === selectedId) ?? null;
+
+  useEffect(() => {
+    setCheckedIds((current) => {
+      const next = new Set(current);
+      const presentIds = new Set(products.map((p) => p.id));
+
+      products.forEach((p) => {
+        if (!knownProductIds.current.has(p.id)) {
+          next.add(p.id); // newly seen product: in the cart by default
+        }
+      });
+      next.forEach((id) => {
+        if (!presentIds.has(id)) next.delete(id); // product no longer exists
+      });
+
+      knownProductIds.current = presentIds;
+      return next;
+    });
+  }, [products]);
+
+  const toggleCartItem = useCallback((id: string) => {
+    setCheckedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const cartTotal = useMemo(() => {
+    let sum = 0;
+    let count = 0;
+    let currency: string | null = null;
+
+    products.forEach((p) => {
+      if (!checkedIds.has(p.id) || p.priceValue == null) return;
+      sum += p.priceValue;
+      count += 1;
+      if (!currency && p.currency) currency = p.currency;
+    });
+
+    return { sum, count, currency };
+  }, [products, checkedIds]);
 
   const applyDatabaseProductUpdate = useCallback((databaseProduct: DatabaseProduct) => {
     const [updatedProduct] = databaseProductsToProducts([databaseProduct]);
@@ -721,6 +786,75 @@ function App() {
       <div className="bc-hint">
         Drag to look around · Click a card for details · Esc to go back
       </div>
+
+      <button
+        className="bc-cart-fab"
+        onClick={() => setCartOpen((v) => !v)}
+        aria-label={cartOpen ? "Close cart" : "Open cart"}
+      >
+        🛒
+        {products.length > 0 && (
+          <span className="bc-cart-badge">{products.length}</span>
+        )}
+      </button>
+
+      {cartOpen && (
+        <div className="bc-cart-panel">
+          <div className="bc-cart-head">
+            <span>Your Cart</span>
+            <b>{products.length}</b>
+          </div>
+
+          <div className="bc-cart-list">
+            {!products.length && (
+              <div className="bc-cart-empty">No items yet.</div>
+            )}
+            {products.map((p) => (
+              <div className="bc-cart-row" key={p.id}>
+                <input
+                  className="bc-cart-check"
+                  type="checkbox"
+                  checked={checkedIds.has(p.id)}
+                  onChange={() => toggleCartItem(p.id)}
+                  aria-label={`Include ${p.name} in total`}
+                />
+                <span className="bc-cart-thumb">
+                  <ProductImage
+                    alt={p.name}
+                    className="bc-cart-thumb-image"
+                    fallback={
+                      <span className="bc-cart-thumb-emoji">
+                        {emojiFor(p.name)}
+                      </span>
+                    }
+                    src={p.imageUrl}
+                  />
+                </span>
+                <span className="bc-cart-info">
+                  <span className="bc-cart-name">{p.name}</span>
+                  <span className="bc-cart-price">{p.price}</span>
+                </span>
+                <button
+                  className="bc-cart-browse"
+                  disabled={!p.url}
+                  onClick={() =>
+                    p.url && window.open(p.url, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  Browse
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="bc-cart-foot">
+            <span>
+              {cartTotal.count} item{cartTotal.count === 1 ? "" : "s"} counted
+            </span>
+            <b>{formatCurrencyValue(cartTotal.sum, cartTotal.currency)}</b>
+          </div>
+        </div>
+      )}
 
       {!products.length && (
         <div className="bc-empty-state">
@@ -1463,11 +1597,17 @@ function DetailModal({
           <div className="bc-trend-label">Price trend</div>
           <div className="bc-trend-bars">
             {product.graph.map((v, i) => (
-              <span
-                key={i}
-                className={i === product.graph.length - 1 ? "now" : ""}
-                style={{ height: `${(v / max) * 100}%` }}
-              />
+              <div className="bc-trend-bar" key={i}>
+                <div className="bc-trend-bar-track">
+                  <span
+                    className={`bc-trend-bar-fill ${i === product.graph.length - 1 ? "now" : ""}`}
+                    style={{ height: `${(v / max) * 100}%` }}
+                  />
+                </div>
+                <span className="bc-trend-bar-price">
+                  {formatCurrencyValue(v, product.currency)}
+                </span>
+              </div>
             ))}
           </div>
         </div>
@@ -1492,7 +1632,7 @@ function StyleTag() {
       .bc-shell canvas { touch-action: none; }
 
       /* Animal Crossing Custom Cursor on Hoverable Elements */
-      .bc-legend-item, .bc-btn, .bc-card, .bc-modal-close, .bc-check-price {
+      .bc-legend-item, .bc-btn, .bc-card, .bc-modal-close, .bc-check-price, .bc-cart-fab, .bc-cart-browse {
         cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M10,22 L6,24 L4,22 L4,18 L8,14 L12,14 L12,10 L10,6 L12,4 L16,4 L18,8 L18,14 L24,14 L26,16 L26,18 L24,20 L18,20 L18,22 L14,22 L10,22 Z" fill="white" stroke="%235c4331" stroke-width="2.5" stroke-linejoin="round"/></svg>'), auto !important;
       }
 
@@ -1539,8 +1679,50 @@ function StyleTag() {
         background: repeating-linear-gradient(-45deg, #ffa852, #ffa852 12px, #ffba75 12px, #ffba75 24px);
       }
 
-      .bc-hint { position: absolute; right: 18px; bottom: 24px; font-size: 13px; font-weight: 800; color: #8b7355;
+      .bc-hint { position: absolute; right: 96px; bottom: 24px; font-size: 13px; font-weight: 800; color: #8b7355;
         background: #fffff5; padding: 8px 16px; border-radius: 18px; border: 3px solid #f6f0db; }
+
+      /* Cart FAB + Panel */
+      .bc-cart-fab { position: absolute; right: 18px; bottom: 22px; width: 56px; height: 56px; border-radius: 50%;
+        background: #fffff5; border: 3px solid #eaddca; box-shadow: 0 6px 0px rgba(92, 67, 49, 0.15);
+        font-size: 24px; display: flex; align-items: center; justify-content: center;
+        transition: transform .1s; z-index: 40; }
+      .bc-cart-fab:hover { transform: translateY(-2px) scale(1.05); }
+      .bc-cart-badge { position: absolute; top: -6px; right: -6px; background: #e9732f; color: #fff;
+        font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 12px; min-width: 22px; height: 22px;
+        border-radius: 11px; display: flex; align-items: center; justify-content: center;
+        border: 2px solid #fffff5; padding: 0 4px; }
+
+      .bc-cart-panel { position: absolute; right: 18px; bottom: 90px; width: min(360px, 90vw); max-height: 60vh;
+        background: #fffff5; border: 4px solid #eaddca; border-radius: 28px;
+        box-shadow: 0 12px 0px rgba(92, 67, 49, 0.12); display: flex; flex-direction: column;
+        overflow: hidden; z-index: 45; }
+      .bc-cart-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
+        font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 16px; color: #5c4331;
+        background: repeating-linear-gradient(-45deg, #ffbc42, #ffbc42 12px, #ffcc66 12px, #ffcc66 24px);
+        border-bottom: 3px solid #e07b22; flex: none; }
+      .bc-cart-head b { background: #fffff5; color: #5c4331; border-radius: 12px; padding: 2px 10px; font-size: 13px; }
+      .bc-cart-list { overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+      .bc-cart-empty { font-size: 13px; font-weight: 700; color: #8b7355; text-align: center; padding: 20px 0; }
+      .bc-cart-row { display: flex; align-items: center; gap: 10px; background: #fbf6ec; border: 2px solid #ebdcb9;
+        border-radius: 18px; padding: 8px 10px; }
+      .bc-cart-check { width: 18px; height: 18px; accent-color: #e9732f; flex: none; }
+      .bc-cart-thumb { width: 40px; height: 40px; border-radius: 12px; background: #fffff5; border: 2px solid #eaddca;
+        display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+      .bc-cart-thumb-image { width: 100%; height: 100%; object-fit: contain; display: block; padding: 3px; }
+      .bc-cart-thumb-emoji { font-size: 18px; }
+      .bc-cart-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      .bc-cart-name { font-weight: 800; font-size: 12.5px; color: #5c4331; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap; }
+      .bc-cart-price { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 13px; color: #e9732f; }
+      .bc-cart-browse { flex: none; font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 11px; color: #fff;
+        background: #e9732f; border: 2px solid #c65f22; border-radius: 14px; padding: 6px 10px; transition: transform .1s; }
+      .bc-cart-browse:hover { transform: translateY(-1px); }
+      .bc-cart-browse:disabled { background: #ded2bd; border-color: #cbbfa8; color: #fffff5; cursor: not-allowed; transform: none; }
+      .bc-cart-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px;
+        border-top: 3px dashed #ebdcb9; background: #fbf6ec; flex: none; }
+      .bc-cart-foot span { font-size: 12px; font-weight: 800; color: #8b7355; text-transform: uppercase; letter-spacing: .5px; }
+      .bc-cart-foot b { font-family: 'Baloo 2', cursive; font-size: 18px; color: #e9732f; }
 
       /* In-world labels */
       .bc-shelf-label { font-family: 'Baloo 2', cursive; font-weight: 800; font-size: 16px; white-space: nowrap;
@@ -1603,9 +1785,13 @@ function StyleTag() {
       .bc-check-price:hover { transform: translateY(-2px); box-shadow: 0 7px 0px rgba(92, 67, 49, 0.15); }
       
       .bc-trend-label { font-size: 12px; font-weight: 800; color: #8b7355; margin-bottom: 8px; }
-      .bc-trend-bars { display: flex; align-items: flex-end; gap: 8px; height: 72px; background: #fbf6ec; padding: 10px; border-radius: 20px; border: 2px solid #eaddca; }
-      .bc-trend-bars span { flex: 1; background: #ebdcb9; border-radius: 8px 8px 4px 4px; min-height: 8px; }
-      .bc-trend-bars span.now { background: #e9732f; }
+      .bc-trend-bars { display: flex; align-items: stretch; gap: 8px; height: 92px; background: #fbf6ec; padding: 10px 10px 8px; border-radius: 20px; border: 2px solid #eaddca; }
+      .bc-trend-bar { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+      .bc-trend-bar-track { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+      .bc-trend-bar-fill { width: 100%; background: #ebdcb9; border-radius: 8px 8px 4px 4px; min-height: 8px; }
+      .bc-trend-bar-fill.now { background: #e9732f; }
+      .bc-trend-bar-price { flex: none; font-size: 9px; font-weight: 800; color: #8b7355; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
       @media (max-width: 720px) {
         .bc-legend { display: none; }
